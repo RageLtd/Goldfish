@@ -1,0 +1,39 @@
+{
+	"hooks": {
+		"SessionStart": [
+			{
+				"type": "command",
+				"command": "${CLAUDE_PLUGIN_ROOT}/../bin/context-hook"
+			}
+		],
+		"UserPromptSubmit": [
+			{
+				"type": "command",
+				"command": "${CLAUDE_PLUGIN_ROOT}/../bin/new-hook"
+			}
+		],
+		"PostToolUse": [
+			{
+				"matcher": "*",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "${CLAUDE_PLUGIN_ROOT}/../bin/save-hook"
+					}
+				]
+			}
+		],
+		"Stop": [
+			{
+				"type": "command",
+				"command": "${CLAUDE_PLUGIN_ROOT}/../bin/summary-hook"
+			}
+		],
+		"SessionEnd": [
+			{
+				"type": "command",
+				"command": "${CLAUDE_PLUGIN_ROOT}/../bin/cleanup-hook"
+			}
+		]
+	}
+}
