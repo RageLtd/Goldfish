@@ -1,17 +1,34 @@
-node_modules/
-dist/
-*.log
-.DS_Store
-.env
-.env.local
-*.tmp
-*.temp
-.install-version
-.claude/settings.local.json
-plugin/data/
-plugin/data.backup/
-package-lock.json
-private/
+# dependencies (bun install)
+node_modules
 
-# Generated UI files (built from viewer-template.html)
-src/ui/viewer.html
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+_.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_on
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store

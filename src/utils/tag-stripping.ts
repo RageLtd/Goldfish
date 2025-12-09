@@ -1,95 +1,72 @@
 /**
- * Tag Stripping Utilities
- *
- * Implements the dual-tag system for meta-observation control:
- * 1. <claude-mem-context> - System-level tag for auto-injected observations
- *    (prevents recursive storage when context injection is active)
- * 2. <private> - User-level tag for manual privacy control
- *    (allows users to mark content they don't want persisted)
- *
- * EDGE PROCESSING PATTERN: Filter at hook layer before sending to worker/storage.
- * This keeps the worker service simple and follows one-way data stream.
+ * Pure functions for stripping memory-related tags from content.
+ * These tags are used for privacy and context injection.
  */
-
-import { silentDebug } from './silent-debug.js';
 
 /**
- * Maximum number of tags allowed in a single content block
- * This protects against ReDoS (Regular Expression Denial of Service) attacks
- * where malicious input with many nested/unclosed tags could cause catastrophic backtracking
+ * Strips <private>...</private> tags and their content from text.
+ * Uses a stack to track nesting depth - content only included when stack is empty.
  */
-const MAX_TAG_COUNT = 100;
+export const stripPrivateTags = (content: string): string => {
+	const result: string[] = [];
+	let stack = 0;
+	let i = 0;
+
+	while (i < content.length) {
+		if (content.startsWith("<private>", i)) {
+			stack++;
+			i += 9;
+		} else if (content.startsWith("</private>", i)) {
+			if (stack > 0) stack--;
+			i += 10;
+		} else {
+			if (stack === 0) result.push(content[i]);
+			i++;
+		}
+	}
+
+	return result.join("");
+};
 
 /**
- * Count total number of opening tags in content
- * Used for ReDoS protection before regex processing
+ * Strips <claude-mem-context>...</claude-mem-context> tags and their content from text.
  */
-function countTags(content: string): number {
-  const privateCount = (content.match(/<private>/g) || []).length;
-  const contextCount = (content.match(/<claude-mem-context>/g) || []).length;
-  return privateCount + contextCount;
-}
+export const stripContextTags = (content: string): string =>
+	content.replace(/<claude-mem-context>[\s\S]*?<\/claude-mem-context>/g, "");
 
 /**
- * Strip memory tags from JSON-serialized content (tool inputs/responses)
- *
- * @param content - Stringified JSON content from tool_input or tool_response
- * @returns Cleaned content with tags removed, or '{}' if non-string/invalid
- *
- * Note: Returns '{}' for non-strings because this is used in JSON context
- * where we need a valid JSON object if the input is invalid.
+ * Strips <system-reminder>...</system-reminder> tags and their content from text.
  */
-export function stripMemoryTagsFromJson(content: string): string {
-  if (typeof content !== 'string') {
-    silentDebug('[tag-stripping] received non-string for JSON context:', { type: typeof content });
-    return '{}';  // Safe default for JSON context
-  }
-
-  // ReDoS protection: limit tag count before regex processing
-  const tagCount = countTags(content);
-  if (tagCount > MAX_TAG_COUNT) {
-    silentDebug('[tag-stripping] tag count exceeds limit, truncating:', {
-      tagCount,
-      maxAllowed: MAX_TAG_COUNT,
-      contentLength: content.length
-    });
-    // Still process but log the anomaly
-  }
-
-  return content
-    .replace(/<claude-mem-context>[\s\S]*?<\/claude-mem-context>/g, '')
-    .replace(/<private>[\s\S]*?<\/private>/g, '')
-    .trim();
-}
+export const stripSystemReminders = (content: string): string =>
+	content.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "");
 
 /**
- * Strip memory tags from user prompt content
- *
- * @param content - Raw user prompt text
- * @returns Cleaned content with tags removed, or '' if non-string/invalid
- *
- * Note: Returns '' (empty string) for non-strings because this is used in prompt context
- * where an empty prompt indicates the user didn't provide any content.
+ * Strips all memory-related tags (private, context) without trimming.
+ * Preserves whitespace as-is.
  */
-export function stripMemoryTagsFromPrompt(content: string): string {
-  if (typeof content !== 'string') {
-    silentDebug('[tag-stripping] received non-string for prompt context:', { type: typeof content });
-    return '';  // Safe default for prompt content
-  }
+export const stripAllMemoryTags = (content: string): string =>
+	stripContextTags(stripPrivateTags(content));
 
-  // ReDoS protection: limit tag count before regex processing
-  const tagCount = countTags(content);
-  if (tagCount > MAX_TAG_COUNT) {
-    silentDebug('[tag-stripping] tag count exceeds limit, truncating:', {
-      tagCount,
-      maxAllowed: MAX_TAG_COUNT,
-      contentLength: content.length
-    });
-    // Still process but log the anomaly
-  }
+/**
+ * Cleans a prompt by stripping tags, trimming, and normalizing whitespace.
+ * Use this for user prompts before storage.
+ */
+export const cleanPrompt = (content: string): string =>
+	stripAllMemoryTags(content).trim();
 
-  return content
-    .replace(/<claude-mem-context>[\s\S]*?<\/claude-mem-context>/g, '')
-    .replace(/<private>[\s\S]*?<\/private>/g, '')
-    .trim();
-}
+/**
+ * Checks if content is entirely private (nothing remains after stripping and trimming).
+ */
+export const isEntirelyPrivate = (content: string): boolean =>
+	cleanPrompt(content).length === 0;
+
+/**
+ * Strips memory tags from a JSON string, handling edge cases.
+ * Returns '{}' for non-string or invalid inputs.
+ */
+export const stripMemoryTagsFromJson = (content: unknown): string => {
+	if (typeof content !== "string") {
+		return "{}";
+	}
+	return cleanPrompt(content) || "{}";
+};

@@ -1,196 +1,127 @@
 /**
- * XML Parser Module
- * Parses observation and summary XML blocks from SDK responses
+ * Pure functions for parsing XML output from the SDK agent.
+ * These extract structured data from Claude's observation and summary responses.
  */
 
-import { logger } from '../utils/logger.js';
-
-export interface ParsedObservation {
-  type: string;
-  title: string | null;
-  subtitle: string | null;
-  facts: string[];
-  narrative: string | null;
-  concepts: string[];
-  files_read: string[];
-  files_modified: string[];
-}
-
-export interface ParsedSummary {
-  request: string | null;
-  investigated: string | null;
-  learned: string | null;
-  completed: string | null;
-  next_steps: string | null;
-  notes: string | null;
-}
+import type {
+	ObservationType,
+	ParsedObservation,
+	ParsedSummary,
+} from "../types/domain";
+import { isObservationType } from "../types/domain";
 
 /**
- * Parse observation XML blocks from SDK response
- * Returns all observations found in the response
+ * Extracts text content from a single XML tag.
+ * Returns null if tag not found or content is empty/whitespace.
  */
-export function parseObservations(text: string, correlationId?: string): ParsedObservation[] {
-  const observations: ParsedObservation[] = [];
+export const extractTagContent = (
+	xml: string,
+	tagName: string,
+): string | null => {
+	const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`);
+	const match = xml.match(regex);
 
-  // Match <observation>...</observation> blocks (non-greedy)
-  const observationRegex = /<observation>([\s\S]*?)<\/observation>/g;
+	if (!match) {
+		return null;
+	}
 
-  let match;
-  while ((match = observationRegex.exec(text)) !== null) {
-    const obsContent = match[1];
-
-    // Extract all fields
-    const type = extractField(obsContent, 'type');
-    const title = extractField(obsContent, 'title');
-    const subtitle = extractField(obsContent, 'subtitle');
-    const narrative = extractField(obsContent, 'narrative');
-    const facts = extractArrayElements(obsContent, 'facts', 'fact');
-    const concepts = extractArrayElements(obsContent, 'concepts', 'concept');
-    const files_read = extractArrayElements(obsContent, 'files_read', 'file');
-    const files_modified = extractArrayElements(obsContent, 'files_modified', 'file');
-
-    // NOTE FROM THEDOTMACK: ALWAYS save observations - never skip. 10/24/2025
-    // All fields except type are nullable in schema
-    // If type is missing or invalid, use "change" as catch-all fallback
-
-    // Determine final type
-    let finalType = 'change'; // Default catch-all
-    if (type) {
-      const validTypes = ['bugfix', 'feature', 'refactor', 'change', 'discovery', 'decision'];
-      if (validTypes.includes(type.trim())) {
-        finalType = type.trim();
-      } else {
-        logger.warn('PARSER', `Invalid observation type: ${type}, using "change"`, { correlationId });
-      }
-    } else {
-      logger.warn('PARSER', 'Observation missing type field, using "change"', { correlationId });
-    }
-
-    // All other fields are optional - save whatever we have
-
-    // Filter out type from concepts array (types and concepts are separate dimensions)
-    const cleanedConcepts = concepts.filter(c => c !== finalType);
-
-    if (cleanedConcepts.length !== concepts.length) {
-      logger.warn('PARSER', 'Removed observation type from concepts array', {
-        correlationId,
-        type: finalType,
-        originalConcepts: concepts,
-        cleanedConcepts
-      });
-    }
-
-    observations.push({
-      type: finalType,
-      title,
-      subtitle,
-      facts,
-      narrative,
-      concepts: cleanedConcepts,
-      files_read,
-      files_modified
-    });
-  }
-
-  return observations;
-}
+	const content = match[1].trim();
+	return content.length > 0 ? content : null;
+};
 
 /**
- * Parse summary XML block from SDK response
- * Returns null if no valid summary found or if summary was skipped
+ * Extracts a list of items from nested XML tags.
+ * Example: <facts><fact>a</fact><fact>b</fact></facts> -> ['a', 'b']
  */
-export function parseSummary(text: string, sessionId?: number): ParsedSummary | null {
-  // Check for skip_summary first
-  const skipRegex = /<skip_summary\s+reason="([^"]+)"\s*\/>/;
-  const skipMatch = skipRegex.exec(text);
+export const extractTagList = (
+	xml: string,
+	containerTag: string,
+	itemTag: string,
+): readonly string[] => {
+	const containerRegex = new RegExp(
+		`<${containerTag}>([\\s\\S]*?)<\\/${containerTag}>`,
+	);
+	const containerMatch = xml.match(containerRegex);
 
-  if (skipMatch) {
-    logger.info('PARSER', 'Summary skipped', {
-      sessionId,
-      reason: skipMatch[1]
-    });
-    return null;
-  }
+	if (!containerMatch) {
+		return [];
+	}
 
-  // Match <summary>...</summary> block (non-greedy)
-  const summaryRegex = /<summary>([\s\S]*?)<\/summary>/;
-  const summaryMatch = summaryRegex.exec(text);
+	const containerContent = containerMatch[1];
+	const itemRegex = new RegExp(`<${itemTag}>([\\s\\S]*?)<\\/${itemTag}>`, "g");
+	const items: string[] = [];
 
-  if (!summaryMatch) {
-    return null;
-  }
+	for (const match of containerContent.matchAll(itemRegex)) {
+		const item = match[1].trim();
+		if (item.length > 0) {
+			items.push(item);
+		}
+	}
 
-  const summaryContent = summaryMatch[1];
-
-  // Extract fields
-  const request = extractField(summaryContent, 'request');
-  const investigated = extractField(summaryContent, 'investigated');
-  const learned = extractField(summaryContent, 'learned');
-  const completed = extractField(summaryContent, 'completed');
-  const next_steps = extractField(summaryContent, 'next_steps');
-  const notes = extractField(summaryContent, 'notes'); // Optional
-
-  // NOTE FROM THEDOTMACK: 100% of the time we must SAVE the summary, even if fields are missing. 10/24/2025 
-  // NEVER DO THIS NONSENSE AGAIN.
-
-  // Validate required fields are present (notes is optional)
-  // if (!request || !investigated || !learned || !completed || !next_steps) {
-  //   logger.warn('PARSER', 'Summary missing required fields', {
-  //     sessionId,
-  //     hasRequest: !!request,
-  //     hasInvestigated: !!investigated,
-  //     hasLearned: !!learned,
-  //     hasCompleted: !!completed,
-  //     hasNextSteps: !!next_steps
-  //   });
-  //   return null;
-  // }
-
-  return {
-    request,
-    investigated,
-    learned,
-    completed,
-    next_steps,
-    notes
-  };
-}
+	return items;
+};
 
 /**
- * Extract a simple field value from XML content
- * Returns null for missing or empty/whitespace-only fields
+ * Parses a single observation XML block into a ParsedObservation.
  */
-function extractField(content: string, fieldName: string): string | null {
-  const regex = new RegExp(`<${fieldName}>([^<]*)</${fieldName}>`);
-  const match = regex.exec(content);
-  if (!match) return null;
+const parseObservationBlock = (block: string): ParsedObservation => {
+	const rawType = extractTagContent(block, "type");
+	const type: ObservationType =
+		rawType && isObservationType(rawType) ? rawType : "change";
 
-  const trimmed = match[1].trim();
-  return trimmed === '' ? null : trimmed;
-}
+	const concepts = extractTagList(block, "concepts", "concept")
+		// Filter out the observation type from concepts (they're separate dimensions)
+		.filter((c) => c !== type);
+
+	return {
+		type,
+		title: extractTagContent(block, "title"),
+		subtitle: extractTagContent(block, "subtitle"),
+		narrative: extractTagContent(block, "narrative"),
+		facts: extractTagList(block, "facts", "fact"),
+		concepts,
+		filesRead: extractTagList(block, "files_read", "file"),
+		filesModified: extractTagList(block, "files_modified", "file"),
+	};
+};
 
 /**
- * Extract array of elements from XML content
+ * Parses all observation blocks from SDK agent output.
+ * Returns empty array if no observations found.
  */
-function extractArrayElements(content: string, arrayName: string, elementName: string): string[] {
-  const elements: string[] = [];
+export const parseObservations = (
+	text: string,
+): readonly ParsedObservation[] => {
+	const observationRegex = /<observation>([\s\S]*?)<\/observation>/g;
+	const observations: ParsedObservation[] = [];
 
-  // Match the array block
-  const arrayRegex = new RegExp(`<${arrayName}>(.*?)</${arrayName}>`, 's');
-  const arrayMatch = arrayRegex.exec(content);
+	for (const match of text.matchAll(observationRegex)) {
+		observations.push(parseObservationBlock(match[1]));
+	}
 
-  if (!arrayMatch) {
-    return elements;
-  }
+	return observations;
+};
 
-  const arrayContent = arrayMatch[1];
+/**
+ * Parses a summary block from SDK agent output.
+ * Returns null if no summary found.
+ */
+export const parseSummary = (text: string): ParsedSummary | null => {
+	const summaryRegex = /<summary>([\s\S]*?)<\/summary>/;
+	const match = text.match(summaryRegex);
 
-  // Extract individual elements
-  const elementRegex = new RegExp(`<${elementName}>([^<]+)</${elementName}>`, 'g');
-  let elementMatch;
-  while ((elementMatch = elementRegex.exec(arrayContent)) !== null) {
-    elements.push(elementMatch[1].trim());
-  }
+	if (!match) {
+		return null;
+	}
 
-  return elements;
-}
+	const block = match[1];
+
+	return {
+		request: extractTagContent(block, "request"),
+		investigated: extractTagContent(block, "investigated"),
+		learned: extractTagContent(block, "learned"),
+		completed: extractTagContent(block, "completed"),
+		nextSteps: extractTagContent(block, "next_steps"),
+		notes: extractTagContent(block, "notes"),
+	};
+};

@@ -1,14 +1,18 @@
 {
-  "mcpServers": {
-    "old-claude-mem": {
-      "command": "uvx",
-      "args": [
-        "chroma-mcp",
-        "--client-type",
-        "persistent",
-        "--data-dir",
-        "/Users/alexnewman/.claude-mem/backups/chroma-backup-20251005-222403"
-      ]
-    }
-  }
+	"mcpServers": {
+		"sequential-thinking": {
+			"command": "bunx",
+			"args": ["@modelcontextprotocol/server-sequential-thinking"]
+		},
+		"context7": {
+			"type": "http",
+			"url": "https://mcp.context7.com/mcp",
+			"headers": {
+				"Authorization": "Bearer ${CONTEXT7_API_KEY}"
+			},
+			"env": {
+				"CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}"
+			}
+		}
+	}
 }
