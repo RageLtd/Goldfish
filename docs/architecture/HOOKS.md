@@ -12,53 +12,36 @@ Hooks are **thin HTTP clients** that:
 
 ## Hook Configuration
 
-**File:** `plugin/hooks/hookson`
+**File:** `plugin/hooks/hooks.json`
 
 ```json
 {
-  "description": "Claude-mem memory system hooks (Bun runtime)",
   "hooks": {
     "SessionStart": [
-      {
-        "matcher": "startup|clear|compact",
-        "hooks": [
-          { "type": "command", "command": "bun ${CLAUDE_PLUGIN_ROOT}/scripts/context-hook", "timeout": 5 },
-          { "type": "command", "command": "bun ${CLAUDE_PLUGIN_ROOT}/scripts/user-message-hook", "timeout": 5 }
-        ]
-      }
+      { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:context" }
     ],
     "UserPromptSubmit": [
-      {
-        "hooks": [
-          { "type": "command", "command": "bun ${CLAUDE_PLUGIN_ROOT}/scripts/new-hook", "timeout": 120 }
-        ]
-      }
+      { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:new" }
     ],
     "PostToolUse": [
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "bun ${CLAUDE_PLUGIN_ROOT}/scripts/save-hook", "timeout": 120 }
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:save" }
         ]
       }
     ],
     "Stop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "bun ${CLAUDE_PLUGIN_ROOT}/scripts/summary-hook", "timeout": 120 }
-        ]
-      }
+      { "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:summary" }] }
     ],
     "SessionEnd": [
-      {
-        "hooks": [
-          { "type": "command", "command": "bun ${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-hook", "timeout": 120 }
-        ]
-      }
+      { "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:cleanup" }] }
     ]
   }
 }
 ```
+
+> **Note:** All hooks use a single unified CLI binary (`claude-mem`) with subcommands. This reduces plugin size from ~400MB to ~58MB. Run `bun run build` to rebuild.
 
 ## Hook Lifecycle
 
@@ -316,49 +299,40 @@ function createHookResponse(hookName: string, success: boolean): string {
 
 ## Worker Communication
 
-### Ensuring Worker is Running
+### Worker Auto-Start
+
+Hooks automatically start the worker if not running:
 
 ```typescript
-// In shared/worker-utils.ts
-export async function ensureWorkerRunning(): Promise<void> {
-  const port = getWorkerPort();
+// In hooks/runner.ts
+const ensureWorker = async (): Promise<void> => {
+  if (await isWorkerHealthy()) return;
 
-  try {
-    const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
-      signal: AbortSignal.timeout(1000)
-    });
-    if (response.ok) return; // Worker is running
-  } catch {
-    // Worker not running, start it via PM2
-  }
-
-  execSync('pm2 start ecosystem.config.cjs --only claude-mem-worker', {
-    stdio: 'ignore'
+  // Spawn worker as background process
+  const child = spawn(workerBin, ["worker"], {
+    detached: true,
+    stdio: "ignore",
   });
+  child.unref();
 
-  // Wait for worker to be ready
-  await waitForHealthy(port, 10000);
-}
+  // Wait for worker to become healthy
+  await waitForHealthy();
+};
 ```
 
 ### Error Handling Pattern
 
-All hooks use consistent error handling:
+All hooks fail gracefully - they always return valid output so Claude Code continues:
 
 ```typescript
 try {
-  const response = await fetch(...);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-} catch (error: any) {
-  // Connection errors → suggest worker restart
-  if (error.cause?.code === 'ECONNREFUSED' ||
-      error.name === 'TimeoutError' ||
-      error.message.includes('fetch failed')) {
-    throw new Error("There's a problem with the worker. Type `pm2 restart claude-mem-worker` to continue");
-  }
-  throw error;
+  const input = await readStdin<T>();
+  await ensureWorker();
+  const output = await processor(deps, input);
+  writeStdout(output);
+} catch {
+  // Always return valid output so Claude Code continues
+  writeStdout({ continue: true, suppressOutput: true });
 }
 ```
 
@@ -386,32 +360,31 @@ function stripMemoryTags(content: string): string {
 }
 ```
 
-## Building Hooks
+## Building the CLI
 
-Hooks are compiled from TypeScript to JavaScript using Bun.build():
+All components are compiled into a single unified CLI binary:
 
-```javascript
-// scripts/build-hooks
-const hookEntries = [
-  { name: 'context-hook', source: 'src/hooks/context-hook.ts' },
-  { name: 'save-hook', source: 'src/hooks/save-hook.ts' },
-  { name: 'summary-hook', source: 'src/hooks/summary-hook.ts' },
-  { name: 'new-hook', source: 'src/hooks/new-hook.ts' },
-  { name: 'cleanup-hook', source: 'src/hooks/cleanup-hook.ts' },
-  { name: 'user-message-hook', source: 'src/hooks/user-message-hook.ts' }
-];
+```bash
+# Build command
+bun run build
 
-for (const hook of hookEntries) {
-  await Bun.build({
-    entrypoints: [hook.source],
-    outdir: 'plugin/scripts',
-    target: 'bun',
-    format: 'esm',
-    minify: true,
-    naming: `${hook.name}.[ext]`
-  });
-}
+# Output: bin/claude-mem (single ~58MB binary)
 ```
+
+The CLI provides subcommands for all functionality:
+
+```bash
+claude-mem hook:context    # SessionStart hook
+claude-mem hook:new        # UserPromptSubmit hook
+claude-mem hook:save       # PostToolUse hook
+claude-mem hook:summary    # Stop hook
+claude-mem hook:cleanup    # SessionEnd hook
+claude-mem worker          # Start HTTP worker service
+claude-mem mcp             # Start MCP server (stdio)
+claude-mem version         # Show version
+```
+
+This unified approach reduces plugin size from ~400MB (7 separate binaries) to ~58MB (1 binary with subcommands).
 
 ## Testing Hooks
 

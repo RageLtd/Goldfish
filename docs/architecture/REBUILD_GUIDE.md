@@ -7,7 +7,6 @@
 - **Runtime:** Bun (recommended)
 - **Database:** SQLite with FTS5 support (built-in)
 - **Vector DB:** ChromaDB (optional, for semantic search)
-- **Process Manager:** PM2 (for worker service)
 - **Claude Code:** For hook integration
 
 ## Architecture Summary
@@ -165,38 +164,29 @@ class SessionStore {
 }
 ```
 
-### 2.3 PM2 Configuration
+### 2.3 Worker Auto-Start
 
-```javascript
-// ecosystem.config.cjs
-module.exports = {
-  apps: [{
-    name: 'claude-mem-worker',
-    script: './plugin/scripts/worker-service.cjs',
-    interpreter: 'bun',
-    watch: true,
-    ignore_watch: ['node_modules', 'logs', '*.db']
-  }]
-};
-```
+The worker is automatically started by hooks when needed. No external process manager required.
 
 ## Phase 3: Hook System
 
 ### 3.1 Hook Configuration
 
-Create `plugin/hooks/hookson`:
+Create `plugin/hooks/hooks.json`:
 
 ```json
 {
   "hooks": {
-    "SessionStart": [{ "command": "bun ${CLAUDE_PLUGIN_ROOT}/scripts/context-hook" }],
-    "UserPromptSubmit": [{ "command": "bun ${CLAUDE_PLUGIN_ROOT}/scripts/new-hook" }],
-    "PostToolUse": [{ "matcher": "*", "hooks": [{ "command": "bun ${CLAUDE_PLUGIN_ROOT}/scripts/save-hook" }] }],
-    "Stop": [{ "command": "bun ${CLAUDE_PLUGIN_ROOT}/scripts/summary-hook" }],
-    "SessionEnd": [{ "command": "bun ${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-hook" }]
+    "SessionStart": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:context" }],
+    "UserPromptSubmit": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:new" }],
+    "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:save" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:summary" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:cleanup" }] }]
   }
 }
 ```
+
+> **Note:** All hooks use a single unified CLI binary. Run `bun run build` to compile.
 
 ### 3.2 Hook Implementations
 
@@ -387,11 +377,9 @@ await Bun.build({
 ```json
 {
   "scripts": {
-    "build": "bun scripts/build-hooks",
-    "test": "bun test tests/",
-    "worker:start": "pm2 start ecosystem.config.cjs",
-    "worker:restart": "pm2 restart claude-mem-worker",
-    "worker:logs": "pm2 logs claude-mem-worker"
+    "build": "bun scripts/build.ts",
+    "test": "bun test",
+    "worker": "./plugin/bin/claude-mem worker"
   }
 }
 ```
@@ -461,7 +449,6 @@ claude-mem/
 ├── scripts/                # Build scripts
 ├── tests/                  # Test suites
 ├── docs/architecture/      # This documentation
-├── ecosystem.config.cjs    # PM2 config
 └── packageon
 ```
 
@@ -474,12 +461,9 @@ bun install
 # Build everything
 bun run build
 
-# Start worker
-pm2 start ecosystem.config.cjs
-
 # Run tests
-bun test tests/
+bun test
 
-# View worker logs
-pm2 logs claude-mem-worker
+# Start worker manually (auto-started by hooks)
+./plugin/bin/claude-mem worker
 ```

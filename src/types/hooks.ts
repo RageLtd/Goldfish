@@ -49,6 +49,7 @@ export interface SessionEndInput {
 export interface HookOutput {
 	readonly continue: boolean;
 	readonly suppressOutput?: boolean;
+	readonly systemMessage?: string; // Displayed to user as warning/info
 	readonly hookSpecificOutput?: {
 		readonly hookEventName?: string;
 		readonly additionalContext?: string;
@@ -65,8 +66,13 @@ export const createSuccessOutput = (suppressOutput = true): HookOutput => ({
 	suppressOutput,
 });
 
-export const createContextOutput = (context: string): HookOutput => ({
+export const createContextOutput = (
+	context: string,
+	systemMessage?: string,
+): HookOutput => ({
 	continue: true,
+	suppressOutput: false,
+	systemMessage,
 	hookSpecificOutput: {
 		hookEventName: "SessionStart",
 		additionalContext: context,

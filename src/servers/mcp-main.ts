@@ -166,4 +166,9 @@ const handleMessage = async (
 	}
 };
 
-start();
+export const main = start;
+
+// Run directly if executed as script
+if (import.meta.main) {
+	main();
+}

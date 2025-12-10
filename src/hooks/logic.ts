@@ -104,10 +104,21 @@ export const processContextHook = async (
 		const result = (await getFromWorker(deps, "/context", {
 			project,
 			limit: "20",
-		})) as { context?: string };
+		})) as {
+			context?: string;
+			observationCount?: number;
+			summaryCount?: number;
+		};
 
 		if (result.context?.trim()) {
-			return createContextOutput(result.context);
+			// Determine system message based on whether we have actual context
+			const hasContext =
+				(result.observationCount ?? 0) > 0 || (result.summaryCount ?? 0) > 0;
+			const systemMessage = hasContext
+				? "[claude-mem] Loaded context from previous sessions"
+				: "[claude-mem] Starting fresh session (no previous context)";
+
+			return createContextOutput(result.context, systemMessage);
 		}
 
 		return createSuccessOutput();

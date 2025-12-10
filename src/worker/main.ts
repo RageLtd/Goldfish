@@ -16,7 +16,6 @@ const PORT = parseInt(process.env.CLAUDE_MEM_PORT || "3456", 10);
 const DB_PATH =
 	process.env.CLAUDE_MEM_DB ||
 	join(process.env.HOME || "", ".claude-mem", "memory.db");
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const VERSION = pkg.version;
 
 const log = (message: string) => console.log(`[worker] ${message}`);
@@ -44,20 +43,9 @@ const start = async (): Promise<void> => {
 		const sessionManager = createSessionManager();
 		log("SessionManager initialized");
 
-		// Create SDK agent (only if API key is available)
-		const sdkAgent = ANTHROPIC_API_KEY
-			? createSDKAgent({
-					db,
-					anthropicApiKey: ANTHROPIC_API_KEY,
-					// Note: queryFn will be provided when Anthropic SDK is integrated
-				})
-			: null;
-
-		if (sdkAgent) {
-			log("SDKAgent initialized");
-		} else {
-			log("SDKAgent disabled (no ANTHROPIC_API_KEY)");
-		}
+		// Create SDK agent (uses Claude Agent SDK with user's credentials)
+		const sdkAgent = createSDKAgent({ db });
+		log("SDKAgent initialized");
 
 		// Create router with all dependencies
 		const router = createWorkerRouter({
@@ -76,41 +64,35 @@ const start = async (): Promise<void> => {
 		log(`Worker service running at http://127.0.0.1:${server.port}`);
 
 		// Create background processor for SDK agent
-		const backgroundProcessor = sdkAgent
-			? createBackgroundProcessor({
-					sessionManager,
-					sdkAgent,
-					pollIntervalMs: 1000,
-					onObservationStored: (sessionId, _observationId) => {
-						log(`Observation stored for session ${sessionId}`);
-					},
-					onSummaryStored: (sessionId, _summaryId) => {
-						log(`Summary stored for session ${sessionId}`);
-					},
-					onError: (sessionId, error) => {
-						logError(`SDK error for session ${sessionId}: ${error}`);
-					},
-				})
-			: null;
+		const backgroundProcessor = createBackgroundProcessor({
+			sessionManager,
+			sdkAgent,
+			pollIntervalMs: 1000,
+			onObservationStored: (sessionId, _observationId) => {
+				log(`Observation stored for session ${sessionId}`);
+			},
+			onSummaryStored: (sessionId, _summaryId) => {
+				log(`Summary stored for session ${sessionId}`);
+			},
+			onError: (sessionId, error) => {
+				logError(`SDK error for session ${sessionId}: ${error}`);
+			},
+		});
 
 		// Start background processing
-		if (backgroundProcessor) {
-			backgroundProcessor.start();
-			log("BackgroundProcessor started");
-		}
+		backgroundProcessor.start();
+		log("BackgroundProcessor started");
 
 		// Handle shutdown
 		const shutdown = async () => {
 			log("Shutting down...");
 
 			// Stop background processor and wait for active processing
-			if (backgroundProcessor) {
-				backgroundProcessor.stop();
-				log(
-					`Waiting for ${backgroundProcessor.getActiveProcessingCount()} active processing tasks...`,
-				);
-				await backgroundProcessor.awaitCompletion(5000);
-			}
+			backgroundProcessor.stop();
+			log(
+				`Waiting for ${backgroundProcessor.getActiveProcessingCount()} active processing tasks...`,
+			);
+			await backgroundProcessor.awaitCompletion(5000);
 
 			// Close all active sessions
 			for (const session of sessionManager.getActiveSessions()) {
@@ -130,4 +112,9 @@ const start = async (): Promise<void> => {
 	}
 };
 
-start();
+export const main = start;
+
+// Run directly if executed as script
+if (import.meta.main) {
+	main();
+}
