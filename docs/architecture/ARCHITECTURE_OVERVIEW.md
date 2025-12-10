@@ -32,7 +32,7 @@ Claude-mem is a plugin for Claude Code that provides persistent memory by:
          │   HTTP (fire-and-forget)          │                 │
          ▼                 ▼                  ▼                 ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        Worker Service (PM2)                              │
+│                        Worker Service (auto-started)                     │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐          │
 │  │ SessionManager  │  │    SDKAgent     │  │  SearchManager  │          │
 │  │ (state/queues)  │  │ (Claude SDK)    │  │ (FTS5+Chroma)   │          │
@@ -62,7 +62,7 @@ Hooks run in the Claude Code process and make HTTP calls to the worker service.
 | `user-message-hook` | UserPromptSubmit | Track user message metadata |
 
 ### 2. Worker Service (Background Process)
-Express HTTP server managed by PM2, running on Bun runtime.
+Express HTTP server auto-started by hooks, running on Bun runtime.
 
 **Domain Services:**
 - `SessionManager` - In-memory session state and message queues
@@ -173,9 +173,9 @@ const context = formatContext({
 
 ### Environment Variables
 ```bash
-CLAUDE_MEM_WORKER_PORT=37777      # Worker HTTP port
+CLAUDE_MEM_PORT=3456              # Worker HTTP port (default: 3456)
+CLAUDE_MEM_DB=~/.claude-mem/memory.db  # Database path
 CLAUDE_MEM_MODEL=claude-haiku-4-5 # SDK model
-CLAUDE_MEM_DATA_DIR=~/.claude-mem # Data directory
 CLAUDE_MEM_LOG_LEVEL=INFO         # Logging level
 ```
 
@@ -220,7 +220,7 @@ claude-mem-bun/
 │   ├── build-hooks            # Bun.build() orchestrator
 │   └── build-viewer           # React viewer bundler
 ├── tests/                        # Test suites
-└── ecosystem.config.cjs          # PM2 configuration
+└── package.json
 ```
 
 ## Related Documentation

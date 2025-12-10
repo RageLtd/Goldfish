@@ -2,14 +2,22 @@
 	"hooks": {
 		"SessionStart": [
 			{
-				"type": "command",
-				"command": "${CLAUDE_PLUGIN_ROOT}/../bin/context-hook"
+				"hooks": [
+					{
+						"type": "command",
+						"command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:context"
+					}
+				]
 			}
 		],
 		"UserPromptSubmit": [
 			{
-				"type": "command",
-				"command": "${CLAUDE_PLUGIN_ROOT}/../bin/new-hook"
+				"hooks": [
+					{
+						"type": "command",
+						"command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:new"
+					}
+				]
 			}
 		],
 		"PostToolUse": [
@@ -18,21 +26,29 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "${CLAUDE_PLUGIN_ROOT}/../bin/save-hook"
+						"command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:save"
 					}
 				]
 			}
 		],
 		"Stop": [
 			{
-				"type": "command",
-				"command": "${CLAUDE_PLUGIN_ROOT}/../bin/summary-hook"
+				"hooks": [
+					{
+						"type": "command",
+						"command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:summary"
+					}
+				]
 			}
 		],
 		"SessionEnd": [
 			{
-				"type": "command",
-				"command": "${CLAUDE_PLUGIN_ROOT}/../bin/cleanup-hook"
+				"hooks": [
+					{
+						"type": "command",
+						"command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:cleanup"
+					}
+				]
 			}
 		]
 	}

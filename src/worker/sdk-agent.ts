@@ -1,9 +1,14 @@
 /**
  * SDKAgent - Claude AI processing for observations.
- * Uses Claude to analyze tool executions and extract semantic meaning.
+ * Uses the Claude Agent SDK to analyze tool executions and extract semantic meaning.
  */
 
 import type { Database } from "bun:sqlite";
+import {
+	query,
+	type SDKMessage,
+	type SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 import { storeObservation, storeSummary } from "../db/index";
 import { parseObservations, parseSummary } from "../sdk/parser";
 import {
@@ -22,9 +27,8 @@ import type { ActiveSession } from "./session-manager";
 
 export interface SDKAgentDeps {
 	readonly db: Database;
-	readonly anthropicApiKey: string;
-	readonly queryFn?: QueryFunction;
 	readonly chromaSync?: ChromaSync;
+	readonly model?: string;
 }
 
 export type SDKAgentMessageType =
@@ -38,20 +42,6 @@ export interface SDKAgentMessage {
 	readonly type: SDKAgentMessageType;
 	readonly data?: unknown;
 }
-
-export interface SDKQueryMessage {
-	readonly type: string;
-	readonly content: string;
-	readonly usage?: {
-		readonly input_tokens?: number;
-		readonly output_tokens?: number;
-	};
-}
-
-export type QueryFunction = (
-	prompt: AsyncIterable<{ type: string; message: string }>,
-	options: { model: string; abortSignal?: AbortSignal },
-) => AsyncIterable<SDKQueryMessage>;
 
 export interface PendingInputMessage {
 	readonly type: "observation" | "summarize" | "continuation";
@@ -71,12 +61,70 @@ export interface SDKAgent {
 	) => AsyncIterable<SDKAgentMessage>;
 }
 
+// All tools are disallowed - the memory agent is observer-only
+const DISALLOWED_TOOLS = [
+	"Bash",
+	"Edit",
+	"MultiEdit",
+	"Write",
+	"WebFetch",
+	"WebSearch",
+	"TodoRead",
+	"TodoWrite",
+	"Task",
+	"Glob",
+	"Grep",
+	"LS",
+	"Read",
+	"NotebookEdit",
+];
+
+/**
+ * Creates an SDKUserMessage from a text prompt.
+ */
+const createUserMessage = (
+	text: string,
+	sessionId: string,
+): SDKUserMessage => ({
+	type: "user",
+	message: {
+		role: "user",
+		content: text,
+	},
+	parent_tool_use_id: null,
+	session_id: sessionId,
+});
+
+/**
+ * Extracts text content from an assistant message.
+ */
+const extractAssistantText = (message: SDKMessage): string | null => {
+	if (message.type !== "assistant") return null;
+
+	const content = message.message?.content;
+	if (!content) return null;
+
+	if (typeof content === "string") return content;
+
+	if (Array.isArray(content)) {
+		return content
+			.filter(
+				(block): block is { type: "text"; text: string } =>
+					typeof block === "object" && block !== null && block.type === "text",
+			)
+			.map((block) => block.text)
+			.join("\n");
+	}
+
+	return null;
+};
+
 // ============================================================================
 // Factory
 // ============================================================================
 
 export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
-	const { db, queryFn, chromaSync } = deps;
+	const { db, chromaSync, model = "claude-haiku-4-5" } = deps;
 
 	const processMessages = async function* (
 		session: ActiveSession,
@@ -89,19 +137,20 @@ export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
 		}
 
 		let promptNumber = 1;
-		let totalTokens = 0;
+		let totalInputTokens = 0;
+		let totalOutputTokens = 0;
 
 		// Build prompt generator for SDK
-		async function* promptGenerator() {
+		async function* promptGenerator(): AsyncGenerator<SDKUserMessage> {
 			// Initial prompt
-			yield {
-				type: "user",
-				message: buildInitPrompt({
+			yield createUserMessage(
+				buildInitPrompt({
 					project: session.project,
 					sessionId: session.claudeSessionId,
 					userPrompt: session.userPrompt,
 				}),
-			};
+				session.claudeSessionId,
+			);
 
 			// Process incoming messages
 			for await (const msg of inputMessages) {
@@ -110,59 +159,65 @@ export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
 				}
 
 				if (msg.type === "observation" && msg.data.observation) {
-					yield {
-						type: "user",
-						message: buildObservationPrompt(msg.data.observation),
-					};
+					yield createUserMessage(
+						buildObservationPrompt(msg.data.observation),
+						session.claudeSessionId,
+					);
 				} else if (msg.type === "summarize") {
-					yield {
-						type: "user",
-						message: buildSummaryPrompt({
+					yield createUserMessage(
+						buildSummaryPrompt({
 							lastUserMessage: msg.data.lastUserMessage || "",
 							lastAssistantMessage: msg.data.lastAssistantMessage,
 						}),
-					};
+						session.claudeSessionId,
+					);
 				} else if (msg.type === "continuation" && msg.data.userPrompt) {
 					promptNumber = msg.data.promptNumber || promptNumber + 1;
-					yield {
-						type: "user",
-						message: buildContinuationPrompt({
+					yield createUserMessage(
+						buildContinuationPrompt({
 							userPrompt: msg.data.userPrompt,
 							promptNumber,
 							sessionId: session.claudeSessionId,
 						}),
-					};
+						session.claudeSessionId,
+					);
 				}
 			}
 		}
 
-		// If no queryFn provided, we can't process
-		if (!queryFn) {
-			yield { type: "error", data: "No query function provided" };
-			return;
-		}
-
 		try {
+			// Use the Agent SDK query function
+			const queryResult = query({
+				prompt: promptGenerator(),
+				options: {
+					model,
+					disallowedTools: DISALLOWED_TOOLS,
+					abortController: session.abortController,
+				},
+			});
+
 			// Process SDK responses
-			for await (const response of queryFn(promptGenerator(), {
-				model: "claude-haiku-4-5",
-				abortSignal: session.abortController.signal,
-			})) {
+			for await (const response of queryResult) {
 				if (session.abortController.signal.aborted) {
 					yield { type: "aborted" };
 					return;
 				}
 
-				// Track tokens
-				if (response.usage) {
-					totalTokens +=
-						(response.usage.input_tokens || 0) +
-						(response.usage.output_tokens || 0);
+				// Track tokens from result messages
+				if (response.type === "result" && response.subtype === "success") {
+					totalInputTokens += response.usage?.input_tokens || 0;
+					totalOutputTokens += response.usage?.output_tokens || 0;
 				}
 
-				if (response.type === "assistant" && response.content) {
+				// Process assistant messages
+				if (response.type === "assistant") {
+					const content = extractAssistantText(response);
+					if (!content) continue;
+
+					const totalTokens = totalInputTokens + totalOutputTokens;
+
 					// Try to parse observations
-					const observations = parseObservations(response.content);
+					const observations = parseObservations(content);
 					for (const obs of observations) {
 						const result = storeObservation(db, {
 							claudeSessionId: session.claudeSessionId,
@@ -191,7 +246,6 @@ export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
 								data: { id: result.value, observation: obs },
 							};
 						} else {
-							// Report storage failure
 							yield {
 								type: "error",
 								data: `Failed to store observation: ${result.error.message}`,
@@ -200,7 +254,7 @@ export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
 					}
 
 					// Try to parse summary
-					const summary = parseSummary(response.content);
+					const summary = parseSummary(content);
 					if (summary) {
 						const result = storeSummary(db, {
 							claudeSessionId: session.claudeSessionId,
@@ -228,7 +282,6 @@ export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
 								data: { id: result.value, summary },
 							};
 						} else {
-							// Report storage failure
 							yield {
 								type: "error",
 								data: `Failed to store summary: ${result.error.message}`,

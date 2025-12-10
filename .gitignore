@@ -32,3 +32,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_on
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# Built binaries
+plugin/bin

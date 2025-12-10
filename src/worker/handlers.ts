@@ -133,12 +133,13 @@ export const handleQueueObservation = async (
 	}
 
 	let sessionId: number;
+	const project = basename(cwd) || "unknown";
 
 	if (!sessionResult.value) {
 		// Create session with minimal info
 		const createResult = createSession(deps.db, {
 			claudeSessionId,
-			project: cwd || "unknown",
+			project,
 			userPrompt: "",
 		});
 
@@ -149,8 +150,28 @@ export const handleQueueObservation = async (
 			};
 		}
 		sessionId = createResult.value.id;
+
+		// Initialize in SessionManager if this is a new session
+		if (createResult.value.isNew && deps.sessionManager) {
+			deps.sessionManager.initializeSession(
+				sessionId,
+				claudeSessionId,
+				project,
+				"",
+			);
+		}
 	} else {
 		sessionId = sessionResult.value.id;
+
+		// Ensure session is initialized in SessionManager (may have been created by another request)
+		if (deps.sessionManager && !deps.sessionManager.getSession(sessionId)) {
+			deps.sessionManager.initializeSession(
+				sessionId,
+				claudeSessionId,
+				project,
+				"",
+			);
+		}
 	}
 
 	// Queue observation in SessionManager if available
@@ -423,7 +444,19 @@ export const handleGetContext = async (
 	const observations = observationsResult.value;
 	const summaries = summariesResult.value;
 
-	const contextParts: string[] = [];
+	// If no context exists, show first-run message
+	if (observations.length === 0 && summaries.length === 0) {
+		return {
+			status: 200,
+			body: {
+				context: `# ${project} recent context\n\nNo previous sessions found for this project yet.`,
+				observationCount: 0,
+				summaryCount: 0,
+			},
+		};
+	}
+
+	const contextParts: string[] = [`# ${project} recent context\n`];
 
 	if (summaries.length > 0) {
 		contextParts.push("## Recent Session Summaries\n");
