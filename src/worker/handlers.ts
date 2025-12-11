@@ -4,9 +4,9 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { basename } from "node:path";
 import {
 	createSession,
+	getObservationById,
 	getRecentObservations,
 	getRecentSummaries,
 	getSessionByClaudeId,
@@ -16,6 +16,13 @@ import {
 	searchSummaries,
 	updateSessionStatus,
 } from "../db/index";
+import {
+	formatContextFull,
+	formatContextIndex,
+	formatObservationFull,
+} from "../utils/context-formatter";
+import { parseSince } from "../utils/temporal";
+import { escapeFts5Query, projectFromCwd } from "../utils/validation";
 import type { SessionManager } from "./session-manager";
 
 // ============================================================================
@@ -54,15 +61,41 @@ export interface CompleteSessionInput {
 	readonly reason: string;
 }
 
+export type ContextFormat = "index" | "full";
+
 export interface GetContextInput {
 	readonly project: string;
 	readonly limit: number;
+	readonly format?: ContextFormat;
+	readonly since?: string;
 }
 
 export interface SearchInput {
 	readonly query: string;
 	readonly type: "observations" | "summaries";
 	readonly project?: string;
+	readonly limit: number;
+	readonly format?: ContextFormat;
+}
+
+export interface TimelineInput {
+	readonly project?: string;
+	readonly limit: number;
+	readonly since?: string;
+}
+
+export interface DecisionsInput {
+	readonly project?: string;
+	readonly limit: number;
+	readonly since?: string;
+}
+
+export interface GetObservationInput {
+	readonly id: number;
+}
+
+export interface FindByFileInput {
+	readonly file: string;
 	readonly limit: number;
 }
 
@@ -133,7 +166,7 @@ export const handleQueueObservation = async (
 	}
 
 	let sessionId: number;
-	const project = basename(cwd) || "unknown";
+	const project = projectFromCwd(cwd);
 
 	if (!sessionResult.value) {
 		// Create session with minimal info
@@ -223,7 +256,7 @@ export const handleQueuePrompt = async (
 
 	let sessionId: number;
 	let promptNumber: number;
-	const project = basename(cwd) || "unknown";
+	const project = projectFromCwd(cwd);
 
 	if (!sessionResult.value) {
 		// Try to create new session (handles race condition via INSERT OR IGNORE)
@@ -415,12 +448,16 @@ export const handleCompleteSession = async (
 
 /**
  * Get context for a project (recent observations and summaries).
+ * Supports progressive disclosure via format parameter (default: index).
  */
 export const handleGetContext = async (
 	deps: WorkerDeps,
 	input: GetContextInput,
 ): Promise<HandlerResponse> => {
-	const { project, limit } = input;
+	const { project, limit, format = "index", since } = input;
+
+	// Parse since filter if provided
+	const sinceEpoch = parseSince(since);
 
 	// Get recent observations
 	const observationsResult = getRecentObservations(deps.db, { project, limit });
@@ -440,9 +477,14 @@ export const handleGetContext = async (
 		};
 	}
 
-	// Format context as string
-	const observations = observationsResult.value;
-	const summaries = summariesResult.value;
+	// Filter by since if provided
+	let observations = observationsResult.value;
+	let summaries = summariesResult.value;
+
+	if (sinceEpoch !== null) {
+		observations = observations.filter((o) => o.createdAtEpoch >= sinceEpoch);
+		summaries = summaries.filter((s) => s.createdAtEpoch >= sinceEpoch);
+	}
 
 	// If no context exists, show first-run message
 	if (observations.length === 0 && summaries.length === 0) {
@@ -452,35 +494,64 @@ export const handleGetContext = async (
 				context: `# ${project} recent context\n\nNo previous sessions found for this project yet.`,
 				observationCount: 0,
 				summaryCount: 0,
+				format,
 			},
 		};
 	}
 
-	const contextParts: string[] = [`# ${project} recent context\n`];
+	// Format based on requested format
+	const context =
+		format === "index"
+			? formatContextIndex(project, observations, summaries)
+			: formatContextFull(project, observations, summaries);
 
-	if (summaries.length > 0) {
-		contextParts.push("## Recent Session Summaries\n");
-		for (const s of summaries) {
-			if (s.request) contextParts.push(`- Request: ${s.request}`);
-			if (s.completed) contextParts.push(`  Completed: ${s.completed}`);
-			if (s.learned) contextParts.push(`  Learned: ${s.learned}`);
-		}
+	return {
+		status: 200,
+		body: {
+			context,
+			observationCount: observations.length,
+			summaryCount: summaries.length,
+			format,
+		},
+	};
+};
+
+/**
+ * Get a single observation by ID (for on-demand detail loading).
+ */
+export const handleGetObservation = async (
+	deps: WorkerDeps,
+	input: GetObservationInput,
+): Promise<HandlerResponse> => {
+	const { id } = input;
+
+	if (!id || id <= 0) {
+		return {
+			status: 400,
+			body: { error: "Valid observation ID is required" },
+		};
 	}
 
-	if (observations.length > 0) {
-		contextParts.push("\n## Recent Observations\n");
-		for (const o of observations) {
-			if (o.title) contextParts.push(`- [${o.type}] ${o.title}`);
-			if (o.narrative) contextParts.push(`  ${o.narrative}`);
-		}
+	const result = getObservationById(deps.db, id);
+	if (!result.ok) {
+		return {
+			status: 500,
+			body: { error: result.error.message },
+		};
+	}
+
+	if (!result.value) {
+		return {
+			status: 404,
+			body: { error: `Observation ${id} not found` },
+		};
 	}
 
 	return {
 		status: 200,
 		body: {
-			context: contextParts.join("\n"),
-			observationCount: observations.length,
-			summaryCount: summaries.length,
+			observation: result.value,
+			formatted: formatObservationFull(result.value),
 		},
 	};
 };
@@ -504,8 +575,15 @@ export const handleSearch = async (
 		};
 	}
 
+	// Escape query for FTS5 safety
+	const escapedQuery = escapeFts5Query(query);
+
 	if (type === "observations") {
-		const result = searchObservations(deps.db, { query, project, limit });
+		const result = searchObservations(deps.db, {
+			query: escapedQuery,
+			project,
+			limit,
+		});
 		if (!result.ok) {
 			return {
 				status: 500,
@@ -523,7 +601,11 @@ export const handleSearch = async (
 	}
 
 	// type === 'summaries'
-	const result = searchSummaries(deps.db, { query, project, limit });
+	const result = searchSummaries(deps.db, {
+		query: escapedQuery,
+		project,
+		limit,
+	});
 	if (!result.ok) {
 		return {
 			status: 500,
@@ -536,6 +618,157 @@ export const handleSearch = async (
 		body: {
 			results: result.value,
 			count: result.value.length,
+		},
+	};
+};
+
+/**
+ * Get a chronological timeline of recent observations and summaries.
+ */
+export const handleGetTimeline = async (
+	deps: WorkerDeps,
+	input: TimelineInput,
+): Promise<HandlerResponse> => {
+	const { project, limit, since } = input;
+
+	// Parse since filter if provided
+	const sinceEpoch = parseSince(since);
+
+	const obsResult = getRecentObservations(deps.db, { project, limit });
+	const sumResult = getRecentSummaries(deps.db, { project, limit });
+
+	if (!obsResult.ok) {
+		return {
+			status: 500,
+			body: { error: obsResult.error.message },
+		};
+	}
+
+	if (!sumResult.ok) {
+		return {
+			status: 500,
+			body: { error: sumResult.error.message },
+		};
+	}
+
+	// Filter by since if provided
+	let observations = obsResult.value;
+	let summaries = sumResult.value;
+
+	if (sinceEpoch !== null) {
+		observations = observations.filter((o) => o.createdAtEpoch >= sinceEpoch);
+		summaries = summaries.filter((s) => s.createdAtEpoch >= sinceEpoch);
+	}
+
+	// Merge and sort by epoch
+	const items = [
+		...observations.map((o) => ({
+			epoch: o.createdAtEpoch,
+			kind: "observation" as const,
+			type: o.type,
+			title: o.title || "Untitled",
+			narrative: o.narrative || o.subtitle,
+		})),
+		...summaries.map((s) => ({
+			epoch: s.createdAtEpoch,
+			kind: "summary" as const,
+			type: "summary",
+			title: s.request || "Untitled",
+			narrative: s.completed,
+		})),
+	]
+		.sort((a, b) => b.epoch - a.epoch)
+		.slice(0, limit);
+
+	return {
+		status: 200,
+		body: {
+			results: items,
+			count: items.length,
+		},
+	};
+};
+
+/**
+ * Get architectural and design decisions.
+ */
+export const handleGetDecisions = async (
+	deps: WorkerDeps,
+	input: DecisionsInput,
+): Promise<HandlerResponse> => {
+	const { project, limit, since } = input;
+
+	// Parse since filter if provided
+	const sinceEpoch = parseSince(since);
+
+	// Get more observations than needed, then filter for decisions
+	const result = getRecentObservations(deps.db, { project, limit: limit * 5 });
+	if (!result.ok) {
+		return {
+			status: 500,
+			body: { error: result.error.message },
+		};
+	}
+
+	let decisions = result.value.filter((o) => o.type === "decision");
+
+	// Filter by since if provided
+	if (sinceEpoch !== null) {
+		decisions = decisions.filter((o) => o.createdAtEpoch >= sinceEpoch);
+	}
+
+	return {
+		status: 200,
+		body: {
+			results: decisions.slice(0, limit),
+			count: decisions.slice(0, limit).length,
+		},
+	};
+};
+
+/**
+ * Find observations related to a specific file.
+ */
+export const handleFindByFile = async (
+	deps: WorkerDeps,
+	input: FindByFileInput,
+): Promise<HandlerResponse> => {
+	const { file, limit } = input;
+
+	if (!file) {
+		return {
+			status: 400,
+			body: { error: "file parameter is required" },
+		};
+	}
+
+	// Use FTS5 with escaped query for indexed search
+	const escapedQuery = escapeFts5Query(file);
+	const result = searchObservations(deps.db, {
+		query: escapedQuery,
+		limit: limit * 3,
+	});
+	if (!result.ok) {
+		return {
+			status: 500,
+			body: { error: result.error.message },
+		};
+	}
+
+	// Filter to observations that actually reference this file in file arrays
+	const matching = result.value
+		.filter(
+			(o) =>
+				o.filesRead.some((f) => f.includes(file)) ||
+				o.filesModified.some((f) => f.includes(file)),
+		)
+		.slice(0, limit);
+
+	return {
+		status: 200,
+		body: {
+			results: matching,
+			count: matching.length,
 		},
 	};
 };

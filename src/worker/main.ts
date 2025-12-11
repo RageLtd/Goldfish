@@ -83,6 +83,10 @@ const start = async (): Promise<void> => {
 		backgroundProcessor.start();
 		log("BackgroundProcessor started");
 
+		// Start session eviction sweep (prevents memory leaks from abandoned sessions)
+		sessionManager.startEvictionSweep();
+		log("Session eviction sweep started");
+
 		// Handle shutdown
 		const shutdown = async () => {
 			log("Shutting down...");

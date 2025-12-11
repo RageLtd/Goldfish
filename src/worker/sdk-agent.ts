@@ -29,6 +29,7 @@ export interface SDKAgentDeps {
 	readonly db: Database;
 	readonly chromaSync?: ChromaSync;
 	readonly model?: string;
+	readonly cwd?: string;
 }
 
 export type SDKAgentMessageType =
@@ -61,6 +62,86 @@ export interface SDKAgent {
 	) => AsyncIterable<SDKAgentMessage>;
 }
 
+/**
+ * System prompt for the memory observer agent.
+ * This tells Claude its role as an observer that extracts and records observations.
+ */
+const SYSTEM_PROMPT = `You are Claude-Mem, a specialized **observer** tool that records what happens during a Claude Code session.
+
+## Your Role
+
+You are an OBSERVER, not an executor. You will receive notifications about tool executions from the primary Claude Code session. Your job is to:
+
+1. **Record** what was LEARNED, BUILT, FIXED, DEPLOYED, or CONFIGURED
+2. **Extract** semantic meaning from tool executions
+3. **Generate** structured observations in XML format
+
+## Critical Rules
+
+- Record OUTCOMES and DELIVERABLES, not actions taken
+- Use past tense verbs: implemented, fixed, deployed, configured, migrated, optimized
+- Focus on WHAT was accomplished, not HOW you're recording it
+- Skip routine operations (empty file checks, package installs, file listings)
+
+## Good Observations
+
+- "Authentication now supports OAuth2 with PKCE flow"
+- "Database schema migrated to use UUID primary keys"
+- "Build pipeline includes automated security scanning"
+
+## Bad Observations (DO NOT DO)
+
+- "Analyzed authentication implementation and stored findings"
+- "Tracked deployment steps and logged outcomes"
+- "Recorded the changes made to the codebase"
+
+## Output Format
+
+When you observe something worth recording, output an observation in this XML format:
+
+<observation>
+  <type>[ bugfix | feature | refactor | change | discovery | decision ]</type>
+  <title>Short title capturing the core action or topic</title>
+  <subtitle>One sentence explanation (max 24 words)</subtitle>
+  <facts>
+    <fact>Concise, self-contained statement</fact>
+    <fact>Another fact with specific details</fact>
+  </facts>
+  <narrative>Full context: What was done, how it works, why it matters</narrative>
+  <concepts>
+    <concept>how-it-works</concept>
+    <concept>problem-solution</concept>
+  </concepts>
+  <files_read>
+    <file>path/to/file.ts</file>
+  </files_read>
+  <files_modified>
+    <file>path/to/modified.ts</file>
+  </files_modified>
+</observation>
+
+## Observation Types
+
+- **bugfix**: Something was broken, now fixed
+- **feature**: New capability or functionality added
+- **refactor**: Code restructured, behavior unchanged
+- **change**: Generic modification (docs, config, misc)
+- **discovery**: Learning about existing system
+- **decision**: Architectural/design choice with rationale
+
+## Concept Tags
+
+Use these to categorize observations:
+- how-it-works: Understanding mechanisms
+- why-it-exists: Purpose or rationale
+- what-changed: Modifications made
+- problem-solution: Issues and their fixes
+- gotcha: Traps or edge cases
+- pattern: Reusable approach
+- trade-off: Pros/cons of a decision
+
+Wait for tool execution notifications before generating observations.`;
+
 // All tools are disallowed - the memory agent is observer-only
 const DISALLOWED_TOOLS = [
 	"Bash",
@@ -78,6 +159,14 @@ const DISALLOWED_TOOLS = [
 	"Read",
 	"NotebookEdit",
 ];
+
+const log = (msg: string) => console.log(`[sdk-agent] ${msg}`);
+const logError = (msg: string, err?: unknown) => {
+	console.error(`[sdk-agent] ERROR: ${msg}`);
+	if (err) {
+		console.error(`[sdk-agent] Details:`, err);
+	}
+};
 
 /**
  * Creates an SDKUserMessage from a text prompt.
@@ -124,14 +213,17 @@ const extractAssistantText = (message: SDKMessage): string | null => {
 // ============================================================================
 
 export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
-	const { db, chromaSync, model = "claude-haiku-4-5" } = deps;
+	const { db, chromaSync, model = "claude-haiku-4-5", cwd } = deps;
 
 	const processMessages = async function* (
 		session: ActiveSession,
 		inputMessages: AsyncIterable<PendingInputMessage>,
 	): AsyncIterable<SDKAgentMessage> {
+		log(`Starting processMessages for session ${session.claudeSessionId}`);
+
 		// Check if already aborted
 		if (session.abortController.signal.aborted) {
+			log("Session already aborted");
 			yield { type: "aborted" };
 			return;
 		}
@@ -142,6 +234,7 @@ export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
 
 		// Build prompt generator for SDK
 		async function* promptGenerator(): AsyncGenerator<SDKUserMessage> {
+			log("promptGenerator: yielding initial prompt");
 			// Initial prompt
 			yield createUserMessage(
 				buildInitPrompt({
@@ -153,17 +246,24 @@ export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
 			);
 
 			// Process incoming messages
+			log("promptGenerator: waiting for input messages");
 			for await (const msg of inputMessages) {
+				log(`promptGenerator: received message type=${msg.type}`);
 				if (session.abortController.signal.aborted) {
+					log("promptGenerator: session aborted, returning");
 					return;
 				}
 
 				if (msg.type === "observation" && msg.data.observation) {
+					log(
+						`promptGenerator: yielding observation for tool=${msg.data.observation.toolName}`,
+					);
 					yield createUserMessage(
 						buildObservationPrompt(msg.data.observation),
 						session.claudeSessionId,
 					);
 				} else if (msg.type === "summarize") {
+					log("promptGenerator: yielding summarize request");
 					yield createUserMessage(
 						buildSummaryPrompt({
 							lastUserMessage: msg.data.lastUserMessage || "",
@@ -173,6 +273,7 @@ export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
 					);
 				} else if (msg.type === "continuation" && msg.data.userPrompt) {
 					promptNumber = msg.data.promptNumber || promptNumber + 1;
+					log(`promptGenerator: yielding continuation prompt #${promptNumber}`);
 					yield createUserMessage(
 						buildContinuationPrompt({
 							userPrompt: msg.data.userPrompt,
@@ -183,54 +284,103 @@ export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
 					);
 				}
 			}
+			log("promptGenerator: input messages exhausted");
 		}
 
-		try {
-			// Use the Agent SDK query function
-			const queryResult = query({
-				prompt: promptGenerator(),
-				options: {
-					model,
-					disallowedTools: DISALLOWED_TOOLS,
-					abortController: session.abortController,
-				},
-			});
+		// Create the prompt generator instance
+		const prompts = promptGenerator();
 
-			// Process SDK responses
-			for await (const response of queryResult) {
-				if (session.abortController.signal.aborted) {
-					yield { type: "aborted" };
-					return;
+		log(`Calling SDK query with model=${model}, cwd=${cwd || process.cwd()}`);
+
+		// Call the SDK query function - no try/catch, let errors propagate
+		const queryResult = query({
+			prompt: prompts,
+			options: {
+				model,
+				systemPrompt: SYSTEM_PROMPT,
+				tools: [], // Observer-only - no tools needed
+				disallowedTools: DISALLOWED_TOOLS,
+				permissionMode: "bypassPermissions",
+				allowDangerouslySkipPermissions: true,
+				cwd: cwd || process.cwd(),
+				abortController: session.abortController,
+			},
+		});
+		log("SDK query() called successfully, got async iterable");
+
+		// Process SDK responses - no try/catch, let errors propagate
+		log("Starting to iterate over SDK responses");
+		let responseCount = 0;
+
+		for await (const response of queryResult) {
+			responseCount++;
+			log(
+				`Received SDK response #${responseCount}: type=${response.type}, subtype=${(response as { subtype?: string }).subtype || "n/a"}`,
+			);
+
+			if (session.abortController.signal.aborted) {
+				log("Session aborted during processing");
+				yield { type: "aborted" };
+				return;
+			}
+
+			// Track tokens from result messages
+			if (
+				response.type === "result" &&
+				(response as { subtype?: string }).subtype === "success"
+			) {
+				const usage = (
+					response as {
+						usage?: { input_tokens?: number; output_tokens?: number };
+					}
+				).usage;
+				totalInputTokens += usage?.input_tokens || 0;
+				totalOutputTokens += usage?.output_tokens || 0;
+				log(
+					`Token update: input=${totalInputTokens}, output=${totalOutputTokens}`,
+				);
+			}
+
+			// Process assistant messages
+			if (response.type === "assistant") {
+				const content = extractAssistantText(response);
+				if (!content) {
+					log("Assistant message had no extractable text content");
+					continue;
 				}
 
-				// Track tokens from result messages
-				if (response.type === "result" && response.subtype === "success") {
-					totalInputTokens += response.usage?.input_tokens || 0;
-					totalOutputTokens += response.usage?.output_tokens || 0;
-				}
+				log(`Assistant content length: ${content.length} chars`);
+				log(`Assistant content preview: ${content.substring(0, 200)}...`);
 
-				// Process assistant messages
-				if (response.type === "assistant") {
-					const content = extractAssistantText(response);
-					if (!content) continue;
+				const totalTokens = totalInputTokens + totalOutputTokens;
 
-					const totalTokens = totalInputTokens + totalOutputTokens;
+				// Try to parse observations
+				const observations = parseObservations(content);
+				log(`Parsed ${observations.length} observations from content`);
 
-					// Try to parse observations
-					const observations = parseObservations(content);
-					for (const obs of observations) {
-						const result = storeObservation(db, {
-							claudeSessionId: session.claudeSessionId,
-							project: session.project,
-							observation: obs,
-							promptNumber,
-							discoveryTokens: totalTokens,
-						});
+				for (const obs of observations) {
+					log(`Storing observation: type=${obs.type}, title=${obs.title}`);
+					const result = storeObservation(db, {
+						claudeSessionId: session.claudeSessionId,
+						project: session.project,
+						observation: obs,
+						promptNumber,
+						discoveryTokens: totalTokens,
+					});
 
-						if (result.ok) {
-							// Sync to ChromaDB if available
-							if (chromaSync) {
-								await chromaSync.addObservation({
+					if (result.ok) {
+						log(`Observation stored with id=${result.value}`);
+
+						// Yield immediately - don't block on ChromaDB
+						yield {
+							type: "observation_stored",
+							data: { id: result.value, observation: obs },
+						};
+
+						// Sync to ChromaDB asynchronously (fire-and-forget)
+						if (chromaSync) {
+							chromaSync
+								.addObservation({
 									id: result.value,
 									sessionId: session.claudeSessionId,
 									type: obs.type,
@@ -238,73 +388,94 @@ export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
 									narrative: obs.narrative,
 									concepts: obs.concepts,
 									project: session.project,
+								})
+								.then((syncResult) => {
+									if (syncResult.ok) {
+										log("ChromaDB sync successful");
+									} else {
+										logError(
+											`ChromaDB sync failed: ${syncResult.error.message}`,
+										);
+									}
+								})
+								.catch((e) => {
+									logError("ChromaDB sync error", e);
 								});
-							}
-
-							yield {
-								type: "observation_stored",
-								data: { id: result.value, observation: obs },
-							};
-						} else {
-							yield {
-								type: "error",
-								data: `Failed to store observation: ${result.error.message}`,
-							};
 						}
+					} else {
+						logError(`Failed to store observation: ${result.error.message}`);
+						yield {
+							type: "error",
+							data: `Failed to store observation: ${result.error.message}`,
+						};
 					}
+				}
 
-					// Try to parse summary
-					const summary = parseSummary(content);
-					if (summary) {
-						const result = storeSummary(db, {
-							claudeSessionId: session.claudeSessionId,
-							project: session.project,
-							summary,
-							promptNumber,
-							discoveryTokens: totalTokens,
-						});
+				// Try to parse summary
+				const summary = parseSummary(content);
+				if (summary) {
+					log(
+						`Storing summary: request=${summary.request?.substring(0, 50)}...`,
+					);
+					const result = storeSummary(db, {
+						claudeSessionId: session.claudeSessionId,
+						project: session.project,
+						summary,
+						promptNumber,
+						discoveryTokens: totalTokens,
+					});
 
-						if (result.ok) {
-							// Sync to ChromaDB if available
-							if (chromaSync) {
-								await chromaSync.addSummary({
+					if (result.ok) {
+						log(`Summary stored with id=${result.value}`);
+
+						// Yield immediately - don't block on ChromaDB
+						yield {
+							type: "summary_stored",
+							data: { id: result.value, summary },
+						};
+
+						// Sync to ChromaDB asynchronously (fire-and-forget)
+						if (chromaSync) {
+							chromaSync
+								.addSummary({
 									id: result.value,
 									sessionId: session.claudeSessionId,
 									request: summary.request,
 									completed: summary.completed,
 									learned: summary.learned,
 									project: session.project,
+								})
+								.then((syncResult) => {
+									if (syncResult.ok) {
+										log("ChromaDB summary sync successful");
+									} else {
+										logError(
+											`ChromaDB summary sync failed: ${syncResult.error.message}`,
+										);
+									}
+								})
+								.catch((e) => {
+									logError("ChromaDB summary sync error", e);
 								});
-							}
-
-							yield {
-								type: "summary_stored",
-								data: { id: result.value, summary },
-							};
-						} else {
-							yield {
-								type: "error",
-								data: `Failed to store summary: ${result.error.message}`,
-							};
 						}
-					}
-
-					// If no observation or summary, just acknowledge
-					if (observations.length === 0 && !summary) {
-						yield { type: "acknowledged" };
+					} else {
+						logError(`Failed to store summary: ${result.error.message}`);
+						yield {
+							type: "error",
+							data: `Failed to store summary: ${result.error.message}`,
+						};
 					}
 				}
-			}
-		} catch (error) {
-			if (session.abortController.signal.aborted) {
-				yield { type: "aborted" };
-			} else {
-				yield {
-					type: "error",
-					data: error instanceof Error ? error.message : String(error),
-				};
+
+				// If no observation or summary, just acknowledge
+				if (observations.length === 0 && !summary) {
+					log("No observations or summary parsed, acknowledging");
+					yield { type: "acknowledged" };
+				}
 			}
 		}
+
+		log(`processMessages complete. Processed ${responseCount} SDK responses.`);
 	};
 
 	return { processMessages };

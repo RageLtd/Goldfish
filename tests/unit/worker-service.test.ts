@@ -246,6 +246,73 @@ describe("worker service router", () => {
 		});
 	});
 
+	describe("GET /timeline", () => {
+		it("returns timeline for project", async () => {
+			const request = new Request(
+				"http://localhost/timeline?project=test-project&limit=10",
+			);
+			const response = await router.handle(request);
+
+			expect(response.status).toBe(200);
+			const body = await response.json();
+			expect(Array.isArray(body.results)).toBe(true);
+			expect(typeof body.count).toBe("number");
+		});
+
+		it("works without project parameter", async () => {
+			const request = new Request("http://localhost/timeline?limit=10");
+			const response = await router.handle(request);
+
+			expect(response.status).toBe(200);
+			const body = await response.json();
+			expect(Array.isArray(body.results)).toBe(true);
+		});
+	});
+
+	describe("GET /decisions", () => {
+		it("returns decisions for project", async () => {
+			const request = new Request(
+				"http://localhost/decisions?project=test-project&limit=10",
+			);
+			const response = await router.handle(request);
+
+			expect(response.status).toBe(200);
+			const body = await response.json();
+			expect(Array.isArray(body.results)).toBe(true);
+		});
+
+		it("works without project parameter", async () => {
+			const request = new Request("http://localhost/decisions?limit=10");
+			const response = await router.handle(request);
+
+			expect(response.status).toBe(200);
+			const body = await response.json();
+			expect(Array.isArray(body.results)).toBe(true);
+		});
+	});
+
+	describe("GET /find_by_file", () => {
+		it("finds observations by file", async () => {
+			const request = new Request(
+				"http://localhost/find_by_file?file=src/auth.ts&limit=10",
+			);
+			const response = await router.handle(request);
+
+			expect(response.status).toBe(200);
+			const body = await response.json();
+			expect(Array.isArray(body.results)).toBe(true);
+		});
+
+		it("returns 400 for missing file parameter", async () => {
+			const request = new Request("http://localhost/find_by_file?limit=10");
+			const response = await router.handle(request);
+
+			expect(response.status).toBe(400);
+			const body = await response.json();
+			expect(body.error).toContain("file parameter is required");
+		});
+	});
+
 	describe("unknown routes", () => {
 		it("returns 404 for unknown path", async () => {
 			const request = new Request("http://localhost/unknown");

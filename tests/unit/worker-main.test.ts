@@ -1,14 +1,42 @@
 /**
  * Tests for worker main integration.
  * Tests that SessionManager and SDKAgent are properly wired together.
+ * Uses mocked SDK module to avoid spawning actual Claude Code subprocess.
  */
 
 import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { createDatabase, runMigrations } from "../../src/db/index";
-import { createSDKAgent, type QueryFunction } from "../../src/worker/sdk-agent";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import {
+	createDatabase,
+	createSession,
+	runMigrations,
+} from "../../src/db/index";
+
+// Track what the mock query should return
+let mockQueryMessages: unknown[] = [];
+
+// Mock the SDK module - must be done before importing modules that use it
+mock.module("@anthropic-ai/claude-agent-sdk", () => ({
+	query: mock(() => {
+		return (async function* () {
+			for (const msg of mockQueryMessages) {
+				yield msg;
+			}
+		})();
+	}),
+}));
+
+// Import after mocking
+import { createSDKAgent } from "../../src/worker/sdk-agent";
 import { createWorkerRouter } from "../../src/worker/service";
 import { createSessionManager } from "../../src/worker/session-manager";
+
+/**
+ * Helper to set up what the mock query will return.
+ */
+function setMockQueryResponse(messages: unknown[]): void {
+	mockQueryMessages = messages;
+}
 
 describe("worker main integration", () => {
 	let db: Database;
@@ -16,6 +44,8 @@ describe("worker main integration", () => {
 	beforeEach(() => {
 		db = createDatabase(":memory:");
 		runMigrations(db);
+		// Reset mock messages
+		setMockQueryResponse([]);
 	});
 
 	afterEach(() => {
@@ -25,17 +55,7 @@ describe("worker main integration", () => {
 	describe("full integration", () => {
 		it("creates all components with proper dependencies", () => {
 			const sessionManager = createSessionManager();
-
-			const mockQueryFn: QueryFunction = async function* () {
-				yield { type: "assistant", content: "test" };
-			};
-
-			const sdkAgent = createSDKAgent({
-				db,
-				anthropicApiKey: "test-key",
-				queryFn: mockQueryFn,
-			});
-
+			const sdkAgent = createSDKAgent({ db });
 			const router = createWorkerRouter({ db, sessionManager });
 
 			expect(sessionManager).toBeDefined();
@@ -45,22 +65,29 @@ describe("worker main integration", () => {
 
 		it("routes messages from SessionManager to SDKAgent", async () => {
 			const sessionManager = createSessionManager();
-			const processedMessages: string[] = [];
 
-			const mockQueryFn: QueryFunction = async function* (prompts) {
-				for await (const prompt of prompts) {
-					processedMessages.push(prompt.message);
-					yield {
-						type: "assistant",
-						content: `<observation type="learned"><title>Test</title></observation>`,
-					};
-				}
-			};
+			// Set up mock to return an observation
+			setMockQueryResponse([
+				{
+					type: "assistant",
+					message: {
+						content: [
+							{
+								type: "text",
+								text: `<observation><type>discovery</type><title>Test Discovery</title></observation>`,
+							},
+						],
+					},
+				},
+			]);
 
-			const sdkAgent = createSDKAgent({
-				db,
-				anthropicApiKey: "test-key",
-				queryFn: mockQueryFn,
+			const sdkAgent = createSDKAgent({ db });
+
+			// Create session in database first (for foreign key constraint)
+			createSession(db, {
+				claudeSessionId: "claude-123",
+				project: "test-project",
+				userPrompt: "Help me fix a bug",
 			});
 
 			// Initialize a session
@@ -116,13 +143,17 @@ describe("worker main integration", () => {
 			for await (const output of agentMessages) {
 				outputs.push(output);
 				// Break after first meaningful output to avoid timeout
-				if (output.type === "observation_stored" || output.type === "aborted") {
+				if (
+					output.type === "observation_stored" ||
+					output.type === "aborted" ||
+					output.type === "acknowledged"
+				) {
 					break;
 				}
 			}
 
-			// Verify the message was processed
-			expect(processedMessages.length).toBeGreaterThan(0);
+			// Verify some output was generated
+			expect(outputs.length).toBeGreaterThan(0);
 		});
 	});
 
@@ -131,23 +162,28 @@ describe("worker main integration", () => {
 			const sessionManager = createSessionManager();
 			const storedObservations: unknown[] = [];
 
-			const mockQueryFn: QueryFunction = async function* (prompts) {
-				for await (const _prompt of prompts) {
-					// Simulate Claude extracting an observation
-					yield {
-						type: "assistant",
-						content: `<observation type="learned">
-<title>Code Pattern Found</title>
-<narrative>Discovered a code pattern</narrative>
-</observation>`,
-					};
-				}
-			};
+			// Set up mock to return observations
+			setMockQueryResponse([
+				{
+					type: "assistant",
+					message: {
+						content: [
+							{
+								type: "text",
+								text: `<observation><type>discovery</type><title>Code Pattern Found</title><narrative>Discovered a code pattern</narrative></observation>`,
+							},
+						],
+					},
+				},
+			]);
 
-			const sdkAgent = createSDKAgent({
-				db,
-				anthropicApiKey: "test-key",
-				queryFn: mockQueryFn,
+			const sdkAgent = createSDKAgent({ db });
+
+			// Create session in database first (for foreign key constraint)
+			createSession(db, {
+				claudeSessionId: "claude-123",
+				project: "test-project",
+				userPrompt: "Analyze this code",
 			});
 
 			// Initialize session
@@ -204,7 +240,7 @@ describe("worker main integration", () => {
 				if (output.type === "observation_stored") {
 					storedObservations.push(output.data);
 				}
-				if (output.type === "aborted") break;
+				if (output.type === "aborted" || output.type === "acknowledged") break;
 			}
 
 			// Should have processed at least one observation

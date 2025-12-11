@@ -1,9 +1,23 @@
 /**
  * SessionManager - In-memory session state and message queues.
  * Manages active SDK sessions and provides async message iterators.
+ * Includes TTL-based eviction to prevent memory leaks from abandoned sessions.
  */
 
 import type { ToolObservation } from "../types/domain";
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/** Default session TTL: 1 hour of inactivity */
+const DEFAULT_SESSION_TTL_MS = 60 * 60 * 1000;
+
+/** Maximum number of active sessions before LRU eviction kicks in */
+const MAX_ACTIVE_SESSIONS = 100;
+
+/** How often to run eviction sweep (5 minutes) */
+const EVICTION_INTERVAL_MS = 5 * 60 * 1000;
 
 // ============================================================================
 // Types
@@ -45,6 +59,7 @@ interface SessionState {
 	readonly waitingResolvers: Array<
 		(value: IteratorResult<PendingMessage>) => void
 	>;
+	lastActivityAt: number;
 	closed: boolean;
 }
 
@@ -79,6 +94,12 @@ export interface SessionManager {
 	) => AsyncIterableIterator<PendingMessage> | null;
 	readonly closeSession: (sessionDbId: number) => boolean;
 	readonly getActiveSessions: () => readonly ActiveSession[];
+	/** Starts the periodic eviction sweep for idle/abandoned sessions */
+	readonly startEvictionSweep: () => void;
+	/** Stops the periodic eviction sweep */
+	readonly stopEvictionSweep: () => void;
+	/** Manually runs eviction (for testing) */
+	readonly evictStaleSessions: () => number;
 }
 
 // ============================================================================
@@ -112,6 +133,7 @@ export const createSessionManager = (): SessionManager => {
 			session,
 			messageQueue: [],
 			waitingResolvers: [],
+			lastActivityAt: Date.now(),
 			closed: false,
 		};
 
@@ -131,6 +153,9 @@ export const createSessionManager = (): SessionManager => {
 		if (!state || state.closed) {
 			return false;
 		}
+
+		// Update last activity timestamp
+		state.lastActivityAt = Date.now();
 
 		const resolver = state.waitingResolvers.shift();
 		if (resolver) {
@@ -235,6 +260,60 @@ export const createSessionManager = (): SessionManager => {
 		return Array.from(sessions.values()).map((s) => s.session);
 	};
 
+	/**
+	 * Evicts stale sessions based on TTL and max session limit.
+	 * Returns the number of sessions evicted.
+	 */
+	const evictStaleSessions = (): number => {
+		const now = Date.now();
+		let evictedCount = 0;
+
+		// First pass: evict sessions that have exceeded TTL
+		for (const [sessionDbId, state] of sessions) {
+			const idleTime = now - state.lastActivityAt;
+			if (idleTime > DEFAULT_SESSION_TTL_MS) {
+				closeSession(sessionDbId);
+				evictedCount++;
+			}
+		}
+
+		// Second pass: if still over limit, evict oldest (LRU)
+		if (sessions.size > MAX_ACTIVE_SESSIONS) {
+			const sortedByActivity = Array.from(sessions.entries()).sort(
+				([, a], [, b]) => a.lastActivityAt - b.lastActivityAt,
+			);
+
+			const toEvict = sortedByActivity.slice(
+				0,
+				sessions.size - MAX_ACTIVE_SESSIONS,
+			);
+			for (const [sessionDbId] of toEvict) {
+				closeSession(sessionDbId);
+				evictedCount++;
+			}
+		}
+
+		return evictedCount;
+	};
+
+	let evictionInterval: ReturnType<typeof setInterval> | null = null;
+
+	const startEvictionSweep = (): void => {
+		if (evictionInterval) {
+			return; // Already running
+		}
+		evictionInterval = setInterval(() => {
+			evictStaleSessions();
+		}, EVICTION_INTERVAL_MS);
+	};
+
+	const stopEvictionSweep = (): void => {
+		if (evictionInterval) {
+			clearInterval(evictionInterval);
+			evictionInterval = null;
+		}
+	};
+
 	return {
 		initializeSession,
 		getSession,
@@ -244,5 +323,8 @@ export const createSessionManager = (): SessionManager => {
 		getMessageIterator,
 		closeSession,
 		getActiveSessions,
+		startEvictionSweep,
+		stopEvictionSweep,
+		evictStaleSessions,
 	};
 };

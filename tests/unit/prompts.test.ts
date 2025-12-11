@@ -38,25 +38,28 @@ describe("buildInitPrompt", () => {
 		expect(prompt).toContain("Help me fix a bug");
 	});
 
-	it("includes observer instructions", () => {
+	it("includes session context XML structure", () => {
 		const prompt = buildInitPrompt({
 			project: "my-project",
 			sessionId: "session-123",
 			userPrompt: "Help me fix a bug",
 		});
 
-		// Should instruct the agent to observe, not execute
-		expect(prompt.toLowerCase()).toContain("observer");
+		// Should include session context XML (observer instructions are now in SDK systemPrompt)
+		expect(prompt).toContain("<session_context>");
+		expect(prompt).toContain("</session_context>");
 	});
 
-	it("includes XML output format instructions", () => {
+	it("indicates session start and observation expectations", () => {
 		const prompt = buildInitPrompt({
 			project: "my-project",
 			sessionId: "session-123",
 			userPrompt: "Help me fix a bug",
 		});
 
-		expect(prompt).toContain("<observation>");
+		// Should indicate session has started and observations are expected
+		expect(prompt.toLowerCase()).toContain("session");
+		expect(prompt.toLowerCase()).toContain("observation");
 	});
 });
 
