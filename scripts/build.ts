@@ -49,7 +49,6 @@ const build = async (): Promise<void> => {
 	log("  ./plugin/bin/claude-mem hook:summary   # Stop hook");
 	log("  ./plugin/bin/claude-mem hook:cleanup   # SessionEnd hook");
 	log("  ./plugin/bin/claude-mem worker         # Start worker service");
-	log("  ./plugin/bin/claude-mem mcp            # Start MCP server");
 };
 
 build();

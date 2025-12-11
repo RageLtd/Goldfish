@@ -4,15 +4,5 @@
 	"version": "1.0.0",
 	"author": {
 		"name": "RageLtd"
-	},
-	"mcpServers": {
-		"claude-mem": {
-			"command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem",
-			"args": ["mcp"],
-			"env": {
-				"CLAUDE_MEM_DB": "${HOME}/.claude-mem/memory.db",
-				"CLAUDE_MEM_WORKER_URL": "http://localhost:3456"
-			}
-		}
 	}
 }

@@ -13,7 +13,6 @@
  *   hook:summary    - Stop hook (generate summary)
  *   hook:cleanup    - SessionEnd hook (cleanup)
  *   worker          - Start HTTP worker service
- *   mcp             - Start MCP server (stdio)
  *   version         - Show version
  */
 
@@ -44,10 +43,6 @@ const COMMANDS: Record<string, () => Promise<void>> = {
 		const { main } = await import("./worker/main");
 		await main();
 	},
-	mcp: async () => {
-		const { main } = await import("./servers/mcp-main");
-		await main();
-	},
 	version: async () => {
 		console.log(`claude-mem-bun v${pkg.version}`);
 	},
@@ -65,12 +60,10 @@ Commands:
   hook:summary    Stop hook - generate session summary
   hook:cleanup    SessionEnd hook - cleanup session
   worker          Start HTTP worker service
-  mcp             Start MCP server (stdio)
   version         Show version
 
 Examples:
-  claude-mem worker          # Start the worker service
-  claude-mem mcp             # Start MCP server for Claude Code
+  claude-mem worker                    # Start the worker service
   echo '{}' | claude-mem hook:context  # Run context hook with stdin
 `);
 };

@@ -3,10 +3,16 @@
  * Pure functional router that maps requests to handlers.
  */
 
+import { sanitizeLimit, sanitizeProject } from "../utils/validation";
 import {
 	type CompleteSessionInput,
+	type ContextFormat,
 	handleCompleteSession,
+	handleFindByFile,
 	handleGetContext,
+	handleGetDecisions,
+	handleGetObservation,
+	handleGetTimeline,
 	handleHealth,
 	handleQueueObservation,
 	handleQueuePrompt,
@@ -43,10 +49,21 @@ const jsonResponse = (status: number, body: unknown): Response => {
 	});
 };
 
+/**
+ * Parses JSON body from request.
+ * Returns null for empty or invalid JSON, allowing callers to return 400.
+ * The try/catch here is intentional - we want to return null for invalid JSON
+ * rather than throwing, so callers can provide user-friendly 400 responses.
+ */
 const parseJsonBody = async <T>(request: Request): Promise<T | null> => {
+	const text = await request.text();
+	if (!text.trim()) {
+		return null;
+	}
 	try {
-		return (await request.json()) as T;
+		return JSON.parse(text) as T;
 	} catch {
+		// Invalid JSON - return null so caller can respond with 400
 		return null;
 	}
 };
@@ -54,6 +71,13 @@ const parseJsonBody = async <T>(request: Request): Promise<T | null> => {
 const getSearchParams = (request: Request): URLSearchParams => {
 	const url = new URL(request.url);
 	return url.searchParams;
+};
+
+/**
+ * Parses format parameter, defaulting to "index" for progressive disclosure.
+ */
+const parseFormat = (param: string | null): ContextFormat => {
+	return param === "full" ? "full" : "index";
 };
 
 // ============================================================================
@@ -146,14 +170,22 @@ const handleContextRoute = async (
 	request: Request,
 ): Promise<Response> => {
 	const params = getSearchParams(request);
-	const project = params.get("project");
-	const limit = parseInt(params.get("limit") || "10", 10);
+	const rawProject = params.get("project");
+	const limit = sanitizeLimit(params.get("limit"));
+	const format = parseFormat(params.get("format"));
+	const since = params.get("since") || undefined;
 
-	if (!project) {
+	if (!rawProject) {
 		return jsonResponse(400, { error: "project parameter is required" });
 	}
 
-	const result = await handleGetContext(deps, { project, limit });
+	const project = sanitizeProject(rawProject);
+	const result = await handleGetContext(deps, {
+		project,
+		limit,
+		format,
+		since,
+	});
 	return jsonResponse(result.status, result.body);
 };
 
@@ -164,8 +196,9 @@ const handleSearchRoute = async (
 	const params = getSearchParams(request);
 	const query = params.get("query");
 	const type = params.get("type") as "observations" | "summaries";
-	const project = params.get("project") || undefined;
-	const limit = parseInt(params.get("limit") || "10", 10);
+	const rawProject = params.get("project");
+	const project = rawProject ? sanitizeProject(rawProject) : undefined;
+	const limit = sanitizeLimit(params.get("limit"));
 
 	if (!query) {
 		return jsonResponse(400, { error: "query parameter is required" });
@@ -181,6 +214,74 @@ const handleSearchRoute = async (
 	return jsonResponse(result.status, result.body);
 };
 
+const handleTimelineRoute = async (
+	deps: WorkerDeps,
+	request: Request,
+): Promise<Response> => {
+	const params = getSearchParams(request);
+	const rawProject = params.get("project");
+	const project = rawProject ? sanitizeProject(rawProject) : undefined;
+	const limit = sanitizeLimit(params.get("limit"));
+	const since = params.get("since") || undefined;
+
+	const result = await handleGetTimeline(deps, {
+		project,
+		limit,
+		since,
+	});
+	return jsonResponse(result.status, result.body);
+};
+
+const handleDecisionsRoute = async (
+	deps: WorkerDeps,
+	request: Request,
+): Promise<Response> => {
+	const params = getSearchParams(request);
+	const rawProject = params.get("project");
+	const project = rawProject ? sanitizeProject(rawProject) : undefined;
+	const limit = sanitizeLimit(params.get("limit"));
+	const since = params.get("since") || undefined;
+
+	const result = await handleGetDecisions(deps, {
+		project,
+		limit,
+		since,
+	});
+	return jsonResponse(result.status, result.body);
+};
+
+const handleFindByFileRoute = async (
+	deps: WorkerDeps,
+	request: Request,
+): Promise<Response> => {
+	const params = getSearchParams(request);
+	const file = params.get("file");
+	const limit = sanitizeLimit(params.get("limit"));
+
+	if (!file) {
+		return jsonResponse(400, { error: "file parameter is required" });
+	}
+
+	const result = await handleFindByFile(deps, { file, limit });
+	return jsonResponse(result.status, result.body);
+};
+
+const handleObservationByIdRoute = async (
+	deps: WorkerDeps,
+	request: Request,
+): Promise<Response> => {
+	const params = getSearchParams(request);
+	const idParam = params.get("id");
+	const id = idParam ? parseInt(idParam, 10) : 0;
+
+	if (!id || Number.isNaN(id) || id <= 0) {
+		return jsonResponse(400, { error: "Valid observation id is required" });
+	}
+
+	const result = await handleGetObservation(deps, { id });
+	return jsonResponse(result.status, result.body);
+};
+
 // ============================================================================
 // Router
 // ============================================================================
@@ -193,6 +294,14 @@ const routes: readonly Route[] = [
 	{ method: "POST", path: "/complete", handler: handleCompleteRoute },
 	{ method: "GET", path: "/context", handler: handleContextRoute },
 	{ method: "GET", path: "/search", handler: handleSearchRoute },
+	{ method: "GET", path: "/timeline", handler: handleTimelineRoute },
+	{ method: "GET", path: "/decisions", handler: handleDecisionsRoute },
+	{ method: "GET", path: "/find_by_file", handler: handleFindByFileRoute },
+	{
+		method: "GET",
+		path: "/observation_by_id",
+		handler: handleObservationByIdRoute,
+	},
 ];
 
 /**

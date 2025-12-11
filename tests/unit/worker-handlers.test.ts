@@ -7,7 +7,10 @@ import {
 } from "../../src/db/index";
 import {
 	handleCompleteSession,
+	handleFindByFile,
 	handleGetContext,
+	handleGetDecisions,
+	handleGetTimeline,
 	handleHealth,
 	handleQueueObservation,
 	handleQueuePrompt,
@@ -274,6 +277,121 @@ describe("worker handlers", () => {
 			});
 
 			expect(result.status).toBe(400);
+		});
+	});
+
+	describe("handleGetTimeline", () => {
+		it("returns timeline of observations and summaries", async () => {
+			createSession(db, {
+				claudeSessionId: "claude-123",
+				project: "test-project",
+				userPrompt: "Test",
+			});
+
+			const result = await handleGetTimeline(deps, {
+				project: "test-project",
+				limit: 10,
+			});
+
+			expect(result.status).toBe(200);
+			expect(Array.isArray(result.body.results)).toBe(true);
+			expect(typeof result.body.count).toBe("number");
+		});
+
+		it("works without project filter", async () => {
+			const result = await handleGetTimeline(deps, {
+				limit: 10,
+			});
+
+			expect(result.status).toBe(200);
+			expect(Array.isArray(result.body.results)).toBe(true);
+		});
+
+		it("respects limit parameter", async () => {
+			const result = await handleGetTimeline(deps, {
+				limit: 5,
+			});
+
+			expect(result.status).toBe(200);
+			expect(result.body.results.length).toBeLessThanOrEqual(5);
+		});
+	});
+
+	describe("handleGetDecisions", () => {
+		it("returns decisions filtered by type", async () => {
+			createSession(db, {
+				claudeSessionId: "claude-123",
+				project: "test-project",
+				userPrompt: "Test",
+			});
+
+			const result = await handleGetDecisions(deps, {
+				project: "test-project",
+				limit: 10,
+			});
+
+			expect(result.status).toBe(200);
+			expect(Array.isArray(result.body.results)).toBe(true);
+			// All results should be type=decision (or empty if none)
+			for (const obs of result.body.results) {
+				expect(obs.type).toBe("decision");
+			}
+		});
+
+		it("works without project filter", async () => {
+			const result = await handleGetDecisions(deps, {
+				limit: 10,
+			});
+
+			expect(result.status).toBe(200);
+			expect(Array.isArray(result.body.results)).toBe(true);
+		});
+
+		it("respects limit parameter", async () => {
+			const result = await handleGetDecisions(deps, {
+				limit: 3,
+			});
+
+			expect(result.status).toBe(200);
+			expect(result.body.results.length).toBeLessThanOrEqual(3);
+		});
+	});
+
+	describe("handleFindByFile", () => {
+		it("finds observations by file path", async () => {
+			createSession(db, {
+				claudeSessionId: "claude-123",
+				project: "test-project",
+				userPrompt: "Test",
+			});
+
+			const result = await handleFindByFile(deps, {
+				file: "login.ts",
+				limit: 10,
+			});
+
+			expect(result.status).toBe(200);
+			expect(Array.isArray(result.body.results)).toBe(true);
+		});
+
+		it("returns 400 for missing file parameter", async () => {
+			const result = await handleFindByFile(deps, {
+				file: "",
+				limit: 10,
+			});
+
+			expect(result.status).toBe(400);
+			expect(result.body.error).toContain("file parameter is required");
+		});
+
+		it("respects limit parameter", async () => {
+			const result = await handleFindByFile(deps, {
+				file: "src",
+				limit: 5,
+			});
+
+			expect(result.status).toBe(200);
+			expect(result.body.results.length).toBeLessThanOrEqual(5);
 		});
 	});
 });

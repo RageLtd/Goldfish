@@ -3,7 +3,6 @@
  * Hooks are thin wrappers that call these functions.
  */
 
-import { basename } from "node:path";
 import type {
 	HookOutput,
 	PostToolUseInput,
@@ -18,6 +17,7 @@ import {
 	isEntirelyPrivate,
 	stripPrivateTags,
 } from "../utils/tag-stripping";
+import { projectFromCwd } from "../utils/validation";
 
 // ============================================================================
 // Types
@@ -34,11 +34,12 @@ export interface HookDeps {
 
 /**
  * Extracts project name from cwd path (cross-platform).
+ * Returns null if cwd is empty/undefined.
  */
 const extractProject = (cwd?: string): string | null => {
 	if (!cwd) return null;
-	const name = basename(cwd);
-	return name || null;
+	const name = projectFromCwd(cwd);
+	return name === "unknown" ? null : name;
 };
 
 /**
@@ -89,6 +90,9 @@ const sanitizeToolResponse = (response: unknown): unknown => {
 
 /**
  * Processes SessionStart hook - fetches and injects context.
+ * Uses progressive disclosure: loads lightweight index (~1,100 tokens)
+ * instead of full content. Agent can fetch details on-demand via
+ * /observation_by_id endpoint.
  */
 export const processContextHook = async (
 	deps: HookDeps,
@@ -103,11 +107,13 @@ export const processContextHook = async (
 	try {
 		const result = (await getFromWorker(deps, "/context", {
 			project,
-			limit: "20",
+			limit: "50", // Increased from 20 since index format is lightweight
+			format: "index", // Progressive disclosure: load semantic index, not full content
 		})) as {
 			context?: string;
 			observationCount?: number;
 			summaryCount?: number;
+			format?: string;
 		};
 
 		if (result.context?.trim()) {

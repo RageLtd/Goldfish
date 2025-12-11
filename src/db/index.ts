@@ -179,20 +179,16 @@ export const updateSessionStatus = (
 
 /**
  * Increments prompt counter and returns new value.
+ * Uses RETURNING clause for single-query operation (eliminates N+1).
  */
 export const incrementPromptCounter = (
 	db: Database,
 	sessionId: number,
 ): Result<number> => {
 	try {
-		db.run(
-			"UPDATE sdk_sessions SET prompt_counter = prompt_counter + 1 WHERE id = ?",
-			[sessionId],
-		);
-
 		const row = db
 			.query<{ prompt_counter: number }, [number]>(
-				"SELECT prompt_counter FROM sdk_sessions WHERE id = ?",
+				"UPDATE sdk_sessions SET prompt_counter = prompt_counter + 1 WHERE id = ? RETURNING prompt_counter",
 			)
 			.get(sessionId);
 
