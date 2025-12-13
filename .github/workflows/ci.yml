@@ -96,7 +96,8 @@ jobs:
             if [[ "$msg" =~ ^feat(\(.+\))?: ]]; then
               HAS_FEAT=true
             fi
-            if [[ "$msg" =~ ^(fix|docs|chore|refactor|test|style|perf|ci|build)(\(.+\))?: ]]; then
+            # Only these types trigger a patch release (not docs, chore - internal changes)
+            if [[ "$msg" =~ ^(fix|refactor|test|style|perf|ci|build|revert)(\(.+\))?: ]]; then
               HAS_FIX=true
             fi
           done <<< "$COMMITS"

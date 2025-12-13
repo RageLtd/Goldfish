@@ -8,7 +8,8 @@
  * Commit prefixes and their version bumps:
  *   - feat!:, fix!:, BREAKING CHANGE: → major
  *   - feat: → minor
- *   - fix:, docs:, chore:, refactor:, test:, style:, perf:, ci:, build: → patch
+ *   - fix:, refactor:, test:, style:, perf:, ci:, build:, revert: → patch
+ *   - docs:, chore: → no release (internal changes)
  */
 
 import { execSync } from "node:child_process";
@@ -73,11 +74,24 @@ const getCommitsSinceTag = (tag: string | null): Commit[] => {
 // Conventional Commit Parsing
 // ============================================================================
 
+// All recognized conventional commit types
 const COMMIT_TYPES = [
 	"feat",
 	"fix",
 	"docs",
 	"chore",
+	"refactor",
+	"test",
+	"style",
+	"perf",
+	"ci",
+	"build",
+	"revert",
+];
+
+// Types that trigger a patch release (excludes docs, chore - internal changes)
+const RELEASE_TRIGGER_TYPES = [
+	"fix",
 	"refactor",
 	"test",
 	"style",
@@ -108,7 +122,7 @@ const determineBumpType = (commits: Commit[]): BumpType => {
 
 	let hasBreaking = false;
 	let hasFeature = false;
-	let hasFix = false;
+	let hasPatchTrigger = false;
 
 	for (const commit of commits) {
 		if (commit.breaking) {
@@ -117,14 +131,15 @@ const determineBumpType = (commits: Commit[]): BumpType => {
 		if (commit.type === "feat") {
 			hasFeature = true;
 		}
-		if (COMMIT_TYPES.includes(commit.type)) {
-			hasFix = true;
+		// Only certain types trigger a patch release (not docs, chore)
+		if (RELEASE_TRIGGER_TYPES.includes(commit.type)) {
+			hasPatchTrigger = true;
 		}
 	}
 
 	if (hasBreaking) return "major";
 	if (hasFeature) return "minor";
-	if (hasFix) return "patch";
+	if (hasPatchTrigger) return "patch";
 
 	return "none";
 };

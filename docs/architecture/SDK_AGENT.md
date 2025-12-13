@@ -9,13 +9,13 @@
 │                           SDKAgent                                       │
 │                                                                          │
 │  ┌─────────────────┐     ┌──────────────────┐     ┌──────────────────┐ │
-│  │ Message         │────►│ Agent SDK Query  │────►│ Response Parser  │ │
+│  │ Prompt          │────►│ Agent SDK Query  │────►│ Response Parser  │ │
 │  │ Generator       │     │ Loop             │     │ (XML → Objects)  │ │
 │  └─────────────────┘     └──────────────────┘     └──────────────────┘ │
 │         ▲                                                   │          │
 │         │                                                   ▼          │
 │  ┌──────┴──────────┐                              ┌──────────────────┐ │
-│  │ SessionManager  │                              │ SessionStore +   │ │
+│  │ SessionManager  │                              │ Database +       │ │
 │  │ (message queue) │                              │ ChromaSync       │ │
 │  └─────────────────┘                              └──────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -23,25 +23,22 @@
 
 ## Core Components
 
-### SDKAgent Class
+### SDKAgent Factory
 
-**File:** `src/services/worker/SDKAgent.ts`
+**File:** `src/worker/sdk-agent.ts`
 
 The SDK agent spawns a Claude subprocess via the Anthropic Agent SDK and feeds it observation prompts.
 
 ```typescript
-class SDKAgent {
-  constructor(dbManager: DatabaseManager, sessionManager: SessionManager)
-
-  // Start agent for a session (event-driven)
-  async startSession(session: ActiveSession, worker?: any): Promise<void>
-
-  // Create message generator (yields prompts from queue)
-  private async *createMessageGenerator(session: ActiveSession): AsyncIterableIterator<SDKUserMessage>
-
-  // Process SDK response (parse XML, save to database)
-  private async processSDKResponse(session: ActiveSession, text: string, worker: any, discoveryTokens: number): Promise<void>
+interface SDKAgent {
+  processMessages: (
+    session: ActiveSession,
+    inputMessages: AsyncIterable<PendingInputMessage>
+  ) => AsyncIterable<SDKAgentMessage>;
 }
+
+// Factory function
+const createSDKAgent = (deps: SDKAgentDeps): SDKAgent
 ```
 
 ### Agent SDK Integration
@@ -87,14 +84,25 @@ function buildInitPrompt(project: string, sessionId: string, userPrompt: string)
 
 **Key Instructions:**
 - Agent is an OBSERVER, not an executor
-- Record what was LEARNED/BUILT/FIXED/DEPLOYED/CONFIGURED
-- Focus on deliverables and capabilities
-- Use verbs: implemented, fixed, deployed, configured, migrated, optimized
-- Skip routine operations (empty checks, package installs, file listings)
+- Record what was LEARNED/DISCOVERED/BUILT/FIXED/INVESTIGATED/DEBUGGED
+- Focus on deliverables, insights, and understanding gained
+- Use verbs: discovered, investigated, found, fixed, implemented, learned
+- Be generous about recording - better to record too much than too little
+- Only skip truly trivial operations (empty file checks, basic package installs)
+
+**What to Record:**
+- Bug investigations and root cause analysis
+- Discoveries about how code works
+- Fixes and what was broken
+- New features and functionality
+- Architectural decisions and trade-offs
+- Understanding gained about the codebase
 
 **Good Observations:**
+- "Root cause: observations not stored because SDK agent classifies tool executions as routine"
 - "Authentication now supports OAuth2 with PKCE flow"
-- "Deployment pipeline runs canary releases with auto-rollback"
+- "Database connection pooling was exhausting connections due to missing cleanup"
+- "Discovered that BackgroundProcessor polls every 1 second for active sessions"
 
 **Bad Observations (DO NOT DO):**
 - "Analyzed authentication implementation and stored findings"
@@ -185,7 +193,7 @@ function buildContinuationPrompt(userPrompt: string, promptNumber: number, claud
 | `feature` | New capability or functionality added |
 | `refactor` | Code restructured, behavior unchanged |
 | `change` | Generic modification (docs, config, misc) |
-| `discovery` | Learning about existing system |
+| `discovery` | Learning about existing system, debugging insights, root cause analysis |
 | `decision` | Architectural/design choice with rationale |
 
 **Concept Tags:**
@@ -195,9 +203,11 @@ function buildContinuationPrompt(userPrompt: string, promptNumber: number, claud
 | `why-it-exists` | Purpose or rationale |
 | `what-changed` | Modifications made |
 | `problem-solution` | Issues and their fixes |
+| `root-cause` | Why something was broken |
 | `gotcha` | Traps or edge cases |
 | `pattern` | Reusable approach |
 | `trade-off` | Pros/cons of a decision |
+| `debugging` | Investigation and diagnosis |
 
 ### Summary XML
 
@@ -367,16 +377,37 @@ async *createMessageGenerator(session: ActiveSession): AsyncIterableIterator<SDK
 ### Model Selection
 
 ```typescript
-// From settingson or environment
-const modelId = settings.CLAUDE_MEM_MODEL || 'claude-haiku-4-5';
+// Default model for memory agent
+const model = 'claude-haiku-4-5';
 ```
 
-### Claude Executable
+### Claude Executable Discovery
+
+The SDK agent automatically finds the Claude Code executable:
 
 ```typescript
-const claudePath = process.env.CLAUDE_CODE_PATH ||
-  execSync('which claude', { encoding: 'utf8' }).trim();
+const findClaudeExecutable = (): string | undefined => {
+  const homeDir = process.env.HOME || "";
+
+  // Check common locations in order
+  const locations = [
+    process.env.CLAUDE_CODE_PATH,           // Explicit override
+    `${homeDir}/.local/bin/claude`,         // Common install location
+    `${homeDir}/.claude/local/claude`,      // Alternative location
+    "/usr/local/bin/claude",                // System-wide install
+  ];
+
+  for (const loc of locations) {
+    if (Bun.file(loc).size > 0) {
+      return loc;
+    }
+  }
+
+  return undefined;
+};
 ```
+
+The path is passed to the SDK via `pathToClaudeCodeExecutable` option.
 
 ## Error Handling
 
