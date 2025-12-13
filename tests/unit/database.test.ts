@@ -411,5 +411,138 @@ describe("database", () => {
 				expect(result.value[0].project).toBe("project-a");
 			}
 		});
+
+		it("filters by concept", () => {
+			createSession(db, {
+				claudeSessionId: "claude-123",
+				project: "test-project",
+				userPrompt: "Test",
+			});
+
+			const decisionObs: ParsedObservation = {
+				type: "decision",
+				title: "Use TypeScript",
+				subtitle: null,
+				narrative: "We decided to use TypeScript for type safety",
+				facts: [],
+				concepts: ["decision", "architecture"],
+				filesRead: [],
+				filesModified: [],
+			};
+
+			const featureObs: ParsedObservation = {
+				type: "feature",
+				title: "Add search feature",
+				subtitle: null,
+				narrative: "Implemented search functionality",
+				facts: [],
+				concepts: ["feature", "search"],
+				filesRead: [],
+				filesModified: [],
+			};
+
+			storeObservation(db, {
+				claudeSessionId: "claude-123",
+				project: "test-project",
+				observation: decisionObs,
+				promptNumber: 1,
+			});
+
+			storeObservation(db, {
+				claudeSessionId: "claude-123",
+				project: "test-project",
+				observation: featureObs,
+				promptNumber: 2,
+			});
+
+			// Test concept filtering - should only return decision
+			const result = searchObservations(db, {
+				query: "TypeScript OR search",
+				concept: "decision",
+				limit: 10,
+			});
+
+			expect(result.ok).toBe(true);
+			if (result.ok) {
+				expect(result.value).toHaveLength(1);
+				expect(result.value[0].title).toBe("Use TypeScript");
+				expect(result.value[0].concepts).toContain("decision");
+			}
+		});
+
+		it("concept filter is case-insensitive", () => {
+			createSession(db, {
+				claudeSessionId: "claude-123",
+				project: "test-project",
+				userPrompt: "Test",
+			});
+
+			const obs: ParsedObservation = {
+				type: "decision",
+				title: "Test decision",
+				subtitle: null,
+				narrative: "A decision was made",
+				facts: [],
+				concepts: ["Decision", "Architecture"], // Mixed case
+				filesRead: [],
+				filesModified: [],
+			};
+
+			storeObservation(db, {
+				claudeSessionId: "claude-123",
+				project: "test-project",
+				observation: obs,
+				promptNumber: 1,
+			});
+
+			// Test case-insensitive matching (lowercase query)
+			const result = searchObservations(db, {
+				query: "decision",
+				concept: "decision", // lowercase
+				limit: 10,
+			});
+
+			expect(result.ok).toBe(true);
+			if (result.ok) {
+				expect(result.value).toHaveLength(1);
+			}
+		});
+
+		it("returns empty results when concept doesn't match", () => {
+			createSession(db, {
+				claudeSessionId: "claude-123",
+				project: "test-project",
+				userPrompt: "Test",
+			});
+
+			const obs: ParsedObservation = {
+				type: "feature",
+				title: "Test feature",
+				subtitle: null,
+				narrative: "A feature was implemented",
+				facts: [],
+				concepts: ["feature"],
+				filesRead: [],
+				filesModified: [],
+			};
+
+			storeObservation(db, {
+				claudeSessionId: "claude-123",
+				project: "test-project",
+				observation: obs,
+				promptNumber: 1,
+			});
+
+			const result = searchObservations(db, {
+				query: "feature",
+				concept: "bugfix", // no observations have this concept
+				limit: 10,
+			});
+
+			expect(result.ok).toBe(true);
+			if (result.ok) {
+				expect(result.value).toHaveLength(0);
+			}
+		});
 	});
 });

@@ -73,6 +73,7 @@ export interface GetContextInput {
 export interface SearchInput {
 	readonly query: string;
 	readonly type: "observations" | "summaries";
+	readonly concept?: string;
 	readonly project?: string;
 	readonly limit: number;
 	readonly format?: ContextFormat;
@@ -558,12 +559,13 @@ export const handleGetObservation = async (
 
 /**
  * Search observations or summaries.
+ * When searching observations, an optional concept parameter filters by taxonomy.
  */
 export const handleSearch = async (
 	deps: WorkerDeps,
 	input: SearchInput,
 ): Promise<HandlerResponse> => {
-	const { query, type, project, limit } = input;
+	const { query, type, concept, project, limit } = input;
 
 	// Validate type
 	if (type !== "observations" && type !== "summaries") {
@@ -575,12 +577,23 @@ export const handleSearch = async (
 		};
 	}
 
+	// Validate concept usage - only supported for observations
+	if (concept && type === "summaries") {
+		return {
+			status: 400,
+			body: {
+				error: "concept parameter is only supported for type=observations",
+			},
+		};
+	}
+
 	// Escape query for FTS5 safety
 	const escapedQuery = escapeFts5Query(query);
 
 	if (type === "observations") {
 		const result = searchObservations(deps.db, {
 			query: escapedQuery,
+			concept,
 			project,
 			limit,
 		});
