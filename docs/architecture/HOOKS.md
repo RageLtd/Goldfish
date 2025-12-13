@@ -163,7 +163,6 @@ interface PostToolUseInput {
 **Skip List:**
 ```typescript
 const SKIP_TOOLS = new Set([
-  'ListMcpResourcesTool',  // MCP infrastructure
   'SlashCommand',          // Command invocation meta-tool
   'Skill',                 // Skill invocation meta-tool
   'TodoWrite',             // Task management meta-tool
@@ -380,7 +379,6 @@ claude-mem hook:save       # PostToolUse hook
 claude-mem hook:summary    # Stop hook
 claude-mem hook:cleanup    # SessionEnd hook
 claude-mem worker          # Start HTTP worker service
-claude-mem mcp             # Start MCP server (stdio)
 claude-mem version         # Show version
 ```
 

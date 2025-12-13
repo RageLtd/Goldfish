@@ -311,38 +311,9 @@ async *createMessageGenerator(session) {
 }
 ```
 
-## Phase 5: MCP Server (Optional)
+## Phase 5: Build System
 
-### 5.1 Tool Definitions
-
-Expose search tools via MCP protocol:
-
-```typescript
-const tools = [
-  { name: 'search', handler: (args) => callWorkerAPI('/api/search', args) },
-  { name: 'timeline', handler: (args) => callWorkerAPI('/api/timeline', args) },
-  { name: 'decisions', handler: (args) => callWorkerAPI('/api/decisions', args) },
-  { name: 'find_by_file', handler: (args) => callWorkerAPI('/api/search/by-file', args) },
-  // ...
-];
-```
-
-### 5.2 MCP Protocol
-
-```typescript
-import { Server } from '@modelcontextprotocol/sdk/server/index';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio';
-
-const server = new Server({ name: 'claude-mem-search-server', version: '1.0.0' });
-server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: [...] }));
-server.setRequestHandler(CallToolRequestSchema, (request) => tools.find(t => t.name === request.params.name).handler(request.params.arguments));
-
-await server.connect(new StdioServerTransport());
-```
-
-## Phase 6: Build System
-
-### 6.1 Bun Build Configuration
+### 5.1 Bun Build Configuration
 
 ```javascript
 // scripts/build-hooks
@@ -372,7 +343,7 @@ await Bun.build({
 });
 ```
 
-### 6.2 Package.json Scripts
+### 5.2 Package.json Scripts
 
 ```json
 {
@@ -441,7 +412,6 @@ claude-mem/
 │   │   ├── worker/         # Domain services
 │   │   └── sqlite/         # Database layer
 │   ├── sdk/                # Prompts and parser
-│   ├── servers/            # MCP server
 │   └── utils/              # Shared utilities
 ├── plugin/
 │   ├── hooks/hookson

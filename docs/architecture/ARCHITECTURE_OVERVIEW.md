@@ -211,8 +211,6 @@ claude-mem-bun/
 │   ├── sdk/                      # Claude SDK integration
 │   │   ├── prompts.ts            # Prompt templates
 │   │   └── parser.ts             # XML response parsing
-│   └── servers/
-│       └── mcp-server.ts         # MCP search server
 ├── plugin/                       # Built/compiled plugin
 │   ├── hooks/hookson          # Hook configuration
 │   └── scripts/                  # Compiled JavaScript
@@ -229,5 +227,4 @@ claude-mem-bun/
 - [Worker Service](./WORKER_SERVICE.md) - API endpoints and domain services
 - [Database Schema](./DATABASE.md) - Tables, migrations, and queries
 - [SDK Agent](./SDK_AGENT.md) - AI processing and prompt engineering
-- [MCP Server](./MCP_SERVER.md) - Model Context Protocol integration
 - [Build System](./BUILD.md) - Bun build configuration

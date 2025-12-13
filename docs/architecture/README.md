@@ -10,7 +10,6 @@ This directory contains comprehensive documentation for the claude-mem plugin ar
 | [HOOKS.md](./HOOKS.md) | Hook system lifecycle, implementations, and configuration |
 | [DATABASE.md](./DATABASE.md) | SQLite schema, FTS5 search, migrations, and queries |
 | [SDK_AGENT.md](./SDK_AGENT.md) | AI processing, prompt engineering, and XML parsing |
-| [MCP_SERVER.md](./MCP_SERVER.md) | Model Context Protocol integration and search tools |
 | [REBUILD_GUIDE.md](./REBUILD_GUIDE.md) | Step-by-step guide to rebuild from scratch |
 
 ## Quick Navigation
@@ -27,9 +26,8 @@ This directory contains comprehensive documentation for the claude-mem plugin ar
 
 ### Extending the System
 1. For new hooks: see [HOOKS.md](./HOOKS.md)
-2. For new search tools: see [MCP_SERVER.md](./MCP_SERVER.md)
-3. For schema changes: see [DATABASE.md](./DATABASE.md)
-4. For prompt changes: see [SDK_AGENT.md](./SDK_AGENT.md)
+2. For schema changes: see [DATABASE.md](./DATABASE.md)
+3. For prompt changes: see [SDK_AGENT.md](./SDK_AGENT.md)
 
 ## System Summary
 
@@ -50,10 +48,9 @@ Claude-mem is a persistent memory system for Claude Code that:
 
 **Key Components:**
 - **Hooks** - Thin HTTP clients that capture Claude Code lifecycle events
-- **Worker Service** - Express HTTP server managing sessions and processing
+- **Worker Service** - HTTP server managing sessions and processing
 - **SDK Agent** - Claude AI subprocess for semantic extraction
 - **Database** - SQLite with FTS5 for persistent storage and search
-- **MCP Server** - Optional search tools via Model Context Protocol
 
 **Key Design Decisions:**
 - Hooks have no native dependencies (works on Node or Bun)
