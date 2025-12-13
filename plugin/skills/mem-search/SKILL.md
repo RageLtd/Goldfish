@@ -73,14 +73,23 @@ Response:
 ### Search Observations/Summaries
 
 ```bash
-curl -s "http://localhost:3456/search?query=QUERY&type=TYPE&project=PROJECT&limit=LIMIT"
+curl -s "http://localhost:3456/search?query=QUERY&type=TYPE&concept=CONCEPT&project=PROJECT&limit=LIMIT"
 ```
 
 Parameters:
 - `query` (required): Search text
 - `type`: `observations` or `summaries` (default: observations)
+- `concept`: Filter by taxonomy concept (e.g., `decision`, `bugfix`, `feature`, `refactor`, `discovery`, `change`)
 - `project`: Filter by project name
 - `limit`: Max results (default: 10, max: 100)
+
+**Concept-based search** improves relevance by filtering to observations tagged with specific taxonomy concepts. Use this to find:
+- `decision` - Architectural and design decisions
+- `bugfix` - Bug fixes and issue resolutions
+- `feature` - New functionality implementations
+- `refactor` - Code restructuring
+- `discovery` - Research and exploration findings
+- `change` - General code modifications
 
 ### Get Timeline
 
@@ -206,3 +215,4 @@ Search/Timeline/Decisions return:
 - **Use temporal filters**: `?since=today` or `?since=7d` to narrow scope
 - **Check decisions first**: For "why" questions, decision observations are most valuable
 - **Use file search**: When working on a specific file, find related past work
+- **Use concept filtering**: Add `&concept=decision` to search for specific types of observations

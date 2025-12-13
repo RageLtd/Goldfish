@@ -458,18 +458,21 @@ export const saveUserPrompt = (
 
 interface SearchInput {
 	readonly query: string;
+	readonly concept?: string;
 	readonly project?: string;
 	readonly limit: number;
 }
 
 /**
- * Searches observations using FTS5.
+ * Searches observations using FTS5 with optional concept filtering.
+ * When concept is provided, filters to observations containing that concept tag.
+ * The concept filter uses JSON contains to match against the concepts array.
  */
 export const searchObservations = (
 	db: Database,
 	input: SearchInput,
 ): Result<readonly Observation[]> => {
-	const { query, project, limit } = input;
+	const { query, concept, project, limit } = input;
 
 	try {
 		let sql = `
@@ -479,6 +482,15 @@ export const searchObservations = (
       WHERE observations_fts MATCH ?
     `;
 		const params: (string | number)[] = [query];
+
+		// Add concept filter if provided
+		if (concept) {
+			sql += ` AND EXISTS (
+          SELECT 1 FROM json_each(o.concepts)
+          WHERE LOWER(json_each.value) = LOWER(?)
+        )`;
+			params.push(concept);
+		}
 
 		if (project) {
 			sql += " AND o.project = ?";

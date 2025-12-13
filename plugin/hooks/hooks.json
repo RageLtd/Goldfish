@@ -5,6 +5,10 @@
 				"hooks": [
 					{
 						"type": "command",
+						"command": "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
+					},
+					{
+						"type": "command",
 						"command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:context"
 					}
 				]
