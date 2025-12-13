@@ -104,7 +104,6 @@ Then restart Claude Code to pick up the changes.
 ./plugin/bin/claude-mem hook:summary   # Stop - generate summary
 ./plugin/bin/claude-mem hook:cleanup   # SessionEnd - cleanup
 ./plugin/bin/claude-mem worker         # Start HTTP worker service
-./plugin/bin/claude-mem mcp            # Start MCP server (stdio)
 ./plugin/bin/claude-mem version        # Show version
 ```
 
