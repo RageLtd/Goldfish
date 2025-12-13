@@ -71,20 +71,70 @@ jobs:
         run: bun install
 
       - name: Preview Version Bump
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          # Run and capture output
-          OUTPUT=$(bun scripts/release.ts --dry-run 2>&1 | tail -20)
-
-          # Show in logs
+          # Get commits in this PR (not in base branch)
           echo "📦 Version Bump Preview"
           echo "========================"
-          echo "$OUTPUT"
+          echo ""
+          echo "Commits in this PR:"
+          git log origin/$BASE_REF..HEAD --oneline
+          echo ""
 
-          # Also add to summary
-          echo "## 📦 Version Bump Preview" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "When this PR is merged, the following version change will occur:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "$OUTPUT" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          # Analyze PR commits for version bump
+          COMMITS=$(git log origin/$BASE_REF..HEAD --format="%s")
+
+          HAS_BREAKING=false
+          HAS_FEAT=false
+          HAS_FIX=false
+
+          while IFS= read -r msg; do
+            if [[ "$msg" =~ ^[a-z]+!: ]] || [[ "$msg" == *"BREAKING CHANGE"* ]]; then
+              HAS_BREAKING=true
+            fi
+            if [[ "$msg" =~ ^feat(\(.+\))?: ]]; then
+              HAS_FEAT=true
+            fi
+            if [[ "$msg" =~ ^(fix|docs|chore|refactor|test|style|perf|ci|build)(\(.+\))?: ]]; then
+              HAS_FIX=true
+            fi
+          done <<< "$COMMITS"
+
+          # Determine bump type
+          if $HAS_BREAKING; then
+            BUMP="major"
+          elif $HAS_FEAT; then
+            BUMP="minor"
+          elif $HAS_FIX; then
+            BUMP="patch"
+          else
+            BUMP="none"
+          fi
+
+          CURRENT_VERSION=$(jq -r '.version' package.json)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+
+          case $BUMP in
+            major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
+            minor) NEW_VERSION="$MAJOR.$((MINOR + 1)).0" ;;
+            patch) NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))" ;;
+            *) NEW_VERSION="$CURRENT_VERSION" ;;
+          esac
+
+          echo "Bump type: $BUMP"
+          echo "Version: $CURRENT_VERSION → $NEW_VERSION"
+
+          # Add to summary
+          {
+            echo "## 📦 Version Bump Preview"
+            echo ""
+            echo "**Commits in this PR:**"
+            echo '```'
+            git log origin/$BASE_REF..HEAD --oneline
+            echo '```'
+            echo ""
+            echo "| Current | Bump | New |"
+            echo "|---------|------|-----|"
+            echo "| $CURRENT_VERSION | $BUMP | $NEW_VERSION |"
+          } >> $GITHUB_STEP_SUMMARY
