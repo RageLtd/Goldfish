@@ -72,22 +72,41 @@ const SYSTEM_PROMPT = `You are Claude-Mem, a specialized **observer** tool that 
 
 You are an OBSERVER, not an executor. You will receive notifications about tool executions from the primary Claude Code session. Your job is to:
 
-1. **Record** what was LEARNED, BUILT, FIXED, DEPLOYED, or CONFIGURED
+1. **Record** what was LEARNED, DISCOVERED, BUILT, FIXED, INVESTIGATED, or DEBUGGED
 2. **Extract** semantic meaning from tool executions
 3. **Generate** structured observations in XML format
 
+## What to Record
+
+Record observations for:
+- **Bug investigations**: Root cause analysis, debugging steps, what was found
+- **Discoveries**: How code works, why something behaves a certain way
+- **Fixes**: What was broken and how it was fixed
+- **Features**: New functionality or capabilities added
+- **Decisions**: Architectural choices, trade-offs considered
+- **Understanding gained**: Insights about the codebase, patterns found
+
+## What to Skip
+
+Only skip truly trivial operations:
+- Empty file checks that find nothing
+- Basic package installs with no issues
+- Simple file listings with no insights
+
 ## Critical Rules
 
-- Record OUTCOMES and DELIVERABLES, not actions taken
-- Use past tense verbs: implemented, fixed, deployed, configured, migrated, optimized
-- Focus on WHAT was accomplished, not HOW you're recording it
-- Skip routine operations (empty file checks, package installs, file listings)
+- Record OUTCOMES and INSIGHTS, not just actions taken
+- Use past tense verbs: discovered, investigated, found, fixed, implemented, learned
+- Focus on WHAT was learned or accomplished
+- When debugging: record what was investigated, what was found, and the conclusion
+- Be generous about recording - it's better to record too much than too little
 
 ## Good Observations
 
+- "Root cause: observations not stored because SDK agent classifies tool executions as routine"
 - "Authentication now supports OAuth2 with PKCE flow"
-- "Database schema migrated to use UUID primary keys"
-- "Build pipeline includes automated security scanning"
+- "Database connection pooling was exhausting connections due to missing cleanup"
+- "Discovered that BackgroundProcessor polls every 1 second for active sessions"
 
 ## Bad Observations (DO NOT DO)
 
@@ -126,7 +145,7 @@ When you observe something worth recording, output an observation in this XML fo
 - **feature**: New capability or functionality added
 - **refactor**: Code restructured, behavior unchanged
 - **change**: Generic modification (docs, config, misc)
-- **discovery**: Learning about existing system
+- **discovery**: Learning about existing system, debugging insights, root cause analysis
 - **decision**: Architectural/design choice with rationale
 
 ## Concept Tags
@@ -136,9 +155,11 @@ Use these to categorize observations:
 - why-it-exists: Purpose or rationale
 - what-changed: Modifications made
 - problem-solution: Issues and their fixes
+- root-cause: Why something was broken
 - gotcha: Traps or edge cases
 - pattern: Reusable approach
 - trade-off: Pros/cons of a decision
+- debugging: Investigation and diagnosis
 
 Wait for tool execution notifications before generating observations.`;
 
@@ -212,8 +233,44 @@ const extractAssistantText = (message: SDKMessage): string | null => {
 // Factory
 // ============================================================================
 
+/**
+ * Finds the Claude Code executable path.
+ * Checks common installation locations using Bun-native APIs.
+ */
+const findClaudeExecutable = (): string | undefined => {
+	const homeDir = process.env.HOME || "";
+
+	// Check common locations
+	const locations = [
+		process.env.CLAUDE_CODE_PATH, // Explicit override
+		`${homeDir}/.local/bin/claude`,
+		`${homeDir}/.claude/local/claude`,
+		"/usr/local/bin/claude",
+	].filter(Boolean) as string[];
+
+	for (const loc of locations) {
+		try {
+			// Use Bun.file to check if file exists
+			const file = Bun.file(loc);
+			if (file.size > 0) {
+				return loc;
+			}
+		} catch {
+			// File doesn't exist, continue
+		}
+	}
+
+	return undefined;
+};
+
 export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
 	const { db, chromaSync, model = "claude-haiku-4-5", cwd } = deps;
+	const claudeExecutable = findClaudeExecutable();
+	if (claudeExecutable) {
+		log(`Found Claude executable at: ${claudeExecutable}`);
+	} else {
+		logError("Could not find Claude executable - SDK calls may fail");
+	}
 
 	const processMessages = async function* (
 		session: ActiveSession,
@@ -304,6 +361,9 @@ export const createSDKAgent = (deps: SDKAgentDeps): SDKAgent => {
 				allowDangerouslySkipPermissions: true,
 				cwd: cwd || process.cwd(),
 				abortController: session.abortController,
+				...(claudeExecutable && {
+					pathToClaudeCodeExecutable: claudeExecutable,
+				}),
 			},
 		});
 		log("SDK query() called successfully, got async iterable");

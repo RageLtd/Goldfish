@@ -15,30 +15,94 @@ Claude Code ──► Hooks ──► Worker Service ──► SDK Agent ──�
 
 ## Installation
 
+### As a Claude Code Plugin
+
+1. Add the marketplace:
 ```bash
+/plugin marketplace add https://github.com/RageLtd/claude-mem
+```
+
+2. Install the plugin:
+```bash
+/plugin install claude-mem-bun@rageltd
+```
+
+3. Restart Claude Code
+
+On first session start, the plugin automatically downloads the correct binary for your platform.
+
+### Supported Platforms
+
+- macOS ARM64 (M1/M2/M3)
+- macOS x64 (Intel)
+- Linux x64
+- Linux ARM64
+
+## Plugin Structure
+
+```
+plugin/
+├── .claude-plugin/
+│   └── plugin.json           # Plugin manifest
+├── bin/
+│   └── claude-mem            # Binary (downloaded at runtime)
+├── hooks/
+│   └── hooks.json            # Lifecycle hook configuration
+├── scripts/
+│   └── ensure-binary.sh      # Binary download script
+└── skills/
+    └── mem-search/
+        └── SKILL.md          # Memory search skill
+```
+
+## Hook Lifecycle
+
+| Hook | Command | Purpose |
+|------|---------|---------|
+| SessionStart | `hook:context` | Inject relevant past context |
+| UserPromptSubmit | `hook:new` | Create/update session |
+| PostToolUse | `hook:save` | Capture tool executions |
+| Stop | `hook:summary` | Generate session summary |
+| SessionEnd | `hook:cleanup` | Mark session complete |
+
+## Development
+
+### Prerequisites
+
+- [Bun](https://bun.sh) runtime
+- Claude Code with the plugin installed
+
+### Setup
+
+```bash
+# Install dependencies
 bun install
+
+# Run tests
+bun test
+
+# Type check
+bun run tsc --noEmit
 ```
 
-## Building
+### Build & Install Locally
 
-Build the unified CLI binary:
+After making changes, build and install to the local plugin cache:
 
 ```bash
-bun run build
+bun run dev:install
 ```
 
-This creates a single executable at `plugin/bin/claude-mem` (~58MB) with all functionality.
-
-## Usage
+Then restart Claude Code to pick up the changes.
 
 ### CLI Commands
 
 ```bash
-./plugin/bin/claude-mem hook:context   # SessionStart hook - inject past context
-./plugin/bin/claude-mem hook:new       # UserPromptSubmit hook - create/update session
-./plugin/bin/claude-mem hook:save      # PostToolUse hook - capture observations
-./plugin/bin/claude-mem hook:summary   # Stop hook - generate session summary
-./plugin/bin/claude-mem hook:cleanup   # SessionEnd hook - mark session complete
+./plugin/bin/claude-mem hook:context   # SessionStart - inject context
+./plugin/bin/claude-mem hook:new       # UserPromptSubmit - create session
+./plugin/bin/claude-mem hook:save      # PostToolUse - save observations
+./plugin/bin/claude-mem hook:summary   # Stop - generate summary
+./plugin/bin/claude-mem hook:cleanup   # SessionEnd - cleanup
 ./plugin/bin/claude-mem worker         # Start HTTP worker service
 ./plugin/bin/claude-mem mcp            # Start MCP server (stdio)
 ./plugin/bin/claude-mem version        # Show version
@@ -46,32 +110,43 @@ This creates a single executable at `plugin/bin/claude-mem` (~58MB) with all fun
 
 ### Worker Service
 
-The worker service starts automatically when hooks are invoked. To run it manually:
+The worker service starts automatically when hooks are invoked. To run manually:
 
 ```bash
 ./plugin/bin/claude-mem worker
+# or
+bun run worker:start
 ```
 
-## Claude Code Plugin
+## Releasing
 
-This project is designed as a Claude Code plugin. The plugin structure is in `plugin/`:
+Releases are automated via GitHub Actions.
 
-- `plugin/.claude-plugin/plugin.json` - Plugin manifest with MCP server config
-- `plugin/hooks/hooks.json` - Hook configurations for lifecycle events
+### Creating a Release
 
-### Hook Lifecycle
-
-1. **SessionStart** - Injects relevant past observations as context
-2. **UserPromptSubmit** - Creates/updates session, saves user prompt
-3. **PostToolUse** - Captures tool executions as observations
-4. **Stop** - Generates end-of-session summary
-5. **SessionEnd** - Marks session complete
-
-## Testing
-
+1. Ensure all tests pass:
 ```bash
 bun test
 ```
+
+2. Tag the release:
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+3. GitHub Actions will automatically:
+   - Run type check, lint, and tests
+   - Build binaries for all platforms
+   - Create a GitHub Release with attached binaries
+
+### Release Binaries
+
+Each release includes pre-built binaries:
+- `claude-mem-darwin-arm64` - macOS Apple Silicon
+- `claude-mem-darwin-x64` - macOS Intel
+- `claude-mem-linux-x64` - Linux x64
+- `claude-mem-linux-arm64` - Linux ARM64
 
 ## Architecture
 
@@ -87,3 +162,7 @@ See `docs/architecture/` for detailed documentation:
 - **Runtime:** Bun
 - **Database:** SQLite with FTS5 (built-in)
 - **Claude Code:** For hook integration
+
+## License
+
+MIT

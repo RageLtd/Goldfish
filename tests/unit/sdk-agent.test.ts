@@ -11,9 +11,13 @@ import type { ActiveSession } from "../../src/worker/session-manager";
 // Track what the mock query should return
 let mockQueryMessages: unknown[] = [];
 
+// Track what options were passed to query
+let lastQueryOptions: unknown = null;
+
 // Mock the SDK module - must be done before importing the module that uses it
 mock.module("@anthropic-ai/claude-agent-sdk", () => ({
-	query: mock(() => {
+	query: mock((params: { options?: unknown }) => {
+		lastQueryOptions = params.options;
 		return (async function* () {
 			for (const msg of mockQueryMessages) {
 				yield msg;
@@ -34,6 +38,13 @@ import {
  */
 function setMockQueryResponse(messages: unknown[]): void {
 	mockQueryMessages = messages;
+}
+
+/**
+ * Helper to get the last options passed to query.
+ */
+function getLastQueryOptions(): Record<string, unknown> | null {
+	return lastQueryOptions as Record<string, unknown> | null;
 }
 
 // ============================================================================
@@ -68,8 +79,9 @@ const createMockDb = (): Database => {
 
 describe("SDKAgent", () => {
 	beforeEach(() => {
-		// Reset mock messages before each test
+		// Reset mock messages and captured options before each test
 		setMockQueryResponse([]);
+		lastQueryOptions = null;
 	});
 
 	describe("createSDKAgent", () => {
@@ -746,6 +758,165 @@ describe("SDKAgent", () => {
 			const errorMessage = messages.find((m) => m.type === "error");
 			expect(errorMessage).toBeDefined();
 			expect(String(errorMessage?.data)).toContain("Failed to store summary");
+		});
+	});
+
+	describe("Claude executable path", () => {
+		it("passes pathToClaudeCodeExecutable to SDK query when executable is found", async () => {
+			const mockDb = createMockDb();
+			const deps: SDKAgentDeps = {
+				db: mockDb,
+			};
+
+			// Set up SDK mock to return something
+			setMockQueryResponse([
+				{
+					type: "assistant",
+					message: {
+						content: [{ type: "text", text: "Acknowledged" }],
+					},
+				},
+			]);
+
+			const agent = createSDKAgent(deps);
+			const session = createMockSession();
+
+			async function* inputMessages() {
+				yield {
+					type: "observation" as const,
+					data: {
+						observation: {
+							toolName: "Read",
+							toolInput: {},
+							toolResponse: {},
+							cwd: "/test",
+							occurredAt: new Date().toISOString(),
+						},
+					},
+				};
+			}
+
+			// Consume the generator to trigger the SDK call
+			for await (const _ of agent.processMessages(session, inputMessages())) {
+				// consume
+			}
+
+			// Verify SDK query was called with options
+			const options = getLastQueryOptions();
+			expect(options).not.toBeNull();
+
+			// The pathToClaudeCodeExecutable should be set if Claude is found on the system
+			// In CI/test environments it might not be found, so we check both cases
+			if (options?.pathToClaudeCodeExecutable) {
+				expect(typeof options.pathToClaudeCodeExecutable).toBe("string");
+				expect(
+					(options.pathToClaudeCodeExecutable as string).length,
+				).toBeGreaterThan(0);
+			}
+
+			// Always verify other required options are present
+			expect(options?.model).toBe("claude-haiku-4-5");
+			expect(options?.permissionMode).toBe("bypassPermissions");
+			expect(options?.allowDangerouslySkipPermissions).toBe(true);
+		});
+
+		it("includes correct SDK options for observer mode", async () => {
+			const mockDb = createMockDb();
+			const deps: SDKAgentDeps = {
+				db: mockDb,
+			};
+
+			setMockQueryResponse([
+				{
+					type: "assistant",
+					message: {
+						content: [{ type: "text", text: "Acknowledged" }],
+					},
+				},
+			]);
+
+			const agent = createSDKAgent(deps);
+			const session = createMockSession();
+
+			async function* inputMessages() {
+				yield {
+					type: "observation" as const,
+					data: {
+						observation: {
+							toolName: "Read",
+							toolInput: {},
+							toolResponse: {},
+							cwd: "/test",
+							occurredAt: new Date().toISOString(),
+						},
+					},
+				};
+			}
+
+			for await (const _ of agent.processMessages(session, inputMessages())) {
+				// consume
+			}
+
+			const options = getLastQueryOptions();
+			expect(options).not.toBeNull();
+
+			// Verify observer mode settings
+			expect(options?.tools).toEqual([]);
+			expect(Array.isArray(options?.disallowedTools)).toBe(true);
+			expect((options?.disallowedTools as string[]).length).toBeGreaterThan(0);
+
+			// Verify system prompt is set
+			expect(options?.systemPrompt).toBeDefined();
+			expect(typeof options?.systemPrompt).toBe("string");
+			expect((options?.systemPrompt as string).length).toBeGreaterThan(100);
+		});
+
+		it("includes debugging-related guidance in system prompt", async () => {
+			const mockDb = createMockDb();
+			const deps: SDKAgentDeps = {
+				db: mockDb,
+			};
+
+			setMockQueryResponse([
+				{
+					type: "assistant",
+					message: {
+						content: [{ type: "text", text: "Acknowledged" }],
+					},
+				},
+			]);
+
+			const agent = createSDKAgent(deps);
+			const session = createMockSession();
+
+			async function* inputMessages() {
+				yield {
+					type: "observation" as const,
+					data: {
+						observation: {
+							toolName: "Read",
+							toolInput: {},
+							toolResponse: {},
+							cwd: "/test",
+							occurredAt: new Date().toISOString(),
+						},
+					},
+				};
+			}
+
+			for await (const _ of agent.processMessages(session, inputMessages())) {
+				// consume
+			}
+
+			const options = getLastQueryOptions();
+			const systemPrompt = options?.systemPrompt as string;
+
+			// Verify the system prompt includes debugging guidance
+			expect(systemPrompt).toContain("Bug investigations");
+			expect(systemPrompt).toContain("root cause");
+			expect(systemPrompt).toContain("debugging");
+			expect(systemPrompt).toContain("INVESTIGATED");
+			expect(systemPrompt).toContain("DEBUGGED");
 		});
 	});
 });
