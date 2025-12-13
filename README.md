@@ -120,25 +120,35 @@ bun run worker:start
 
 ## Releasing
 
-Releases are automated via GitHub Actions.
+Releases are fully automated via GitHub Actions using conventional commits.
 
-### Creating a Release
+### Automatic Versioning
 
-1. Ensure all tests pass:
+Version bumps are determined by commit message prefixes:
+
+| Prefix | Version Bump | Example |
+|--------|--------------|---------|
+| `feat!:` or `BREAKING CHANGE:` | **major** | `feat!: redesign API` |
+| `feat:` | **minor** | `feat: add search feature` |
+| `fix:`, `refactor:`, `perf:`, etc. | **patch** | `fix: correct typo` |
+| `docs:`, `chore:` | **none** | `docs: update readme` |
+
+### Workflow
+
+1. **On PR:** CI shows a version preview of what will be released when merged
+2. **On merge to main:**
+   - Commits are analyzed for version bump type
+   - `package.json` version is updated
+   - Git tag is created and pushed
+   - Binaries are built for all platforms
+   - GitHub Release is created with binaries
+
+### Manual Release (Dry Run)
+
+Preview what version bump would occur:
 ```bash
-bun test
+bun run release:dry
 ```
-
-2. Tag the release:
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-3. GitHub Actions will automatically:
-   - Run type check, lint, and tests
-   - Build binaries for all platforms
-   - Create a GitHub Release with attached binaries
 
 ### Release Binaries
 
