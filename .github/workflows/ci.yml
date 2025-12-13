@@ -72,10 +72,19 @@ jobs:
 
       - name: Preview Version Bump
         run: |
+          # Run and capture output
+          OUTPUT=$(bun scripts/release.ts --dry-run 2>&1 | tail -20)
+
+          # Show in logs
+          echo "📦 Version Bump Preview"
+          echo "========================"
+          echo "$OUTPUT"
+
+          # Also add to summary
           echo "## 📦 Version Bump Preview" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "When this PR is merged, the following version change will occur:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          bun scripts/release.ts --dry-run 2>&1 | tail -20 >> $GITHUB_STEP_SUMMARY
+          echo "$OUTPUT" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
