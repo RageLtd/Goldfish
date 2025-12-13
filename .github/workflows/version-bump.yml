@@ -1,0 +1,78 @@
+name: Version Bump
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  version-bump:
+    name: Analyze & Bump Version
+    runs-on: ubuntu-latest
+    # Don't run on release commits to avoid infinite loops
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for tag detection
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Run Version Bump (Dry Run)
+        id: dry-run
+        run: |
+          OUTPUT=$(bun scripts/release.ts --dry-run 2>&1)
+          echo "$OUTPUT"
+
+          # Extract version info
+          if echo "$OUTPUT" | grep -q "Nothing to do"; then
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            NEW_VERSION=$(echo "$OUTPUT" | grep "Version:" | sed 's/.*→ //')
+            BUMP_TYPE=$(echo "$OUTPUT" | grep "Bump type:" | sed 's/.*: //')
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Version Bump
+        if: steps.dry-run.outputs.should_release == 'true'
+        run: bun scripts/release.ts
+
+      - name: Push Changes and Tags
+        if: steps.dry-run.outputs.should_release == 'true'
+        run: git push --follow-tags
+
+      - name: Summary
+        if: steps.dry-run.outputs.should_release == 'true'
+        run: |
+          echo "## 🚀 Version Bump Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **New Version:** v${{ steps.dry-run.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bump Type:** ${{ steps.dry-run.outputs.bump_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The release workflow will now build and publish binaries." >> $GITHUB_STEP_SUMMARY
+
+      - name: No Release Needed
+        if: steps.dry-run.outputs.should_release != 'true'
+        run: |
+          echo "## ℹ️ No Version Bump Needed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "No conventional commits found that require a version bump." >> $GITHUB_STEP_SUMMARY
