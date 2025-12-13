@@ -196,6 +196,7 @@ const handleSearchRoute = async (
 	const params = getSearchParams(request);
 	const query = params.get("query");
 	const type = params.get("type") as "observations" | "summaries";
+	const concept = params.get("concept") || undefined;
 	const rawProject = params.get("project");
 	const project = rawProject ? sanitizeProject(rawProject) : undefined;
 	const limit = sanitizeLimit(params.get("limit"));
@@ -210,7 +211,13 @@ const handleSearchRoute = async (
 		});
 	}
 
-	const result = await handleSearch(deps, { query, type, project, limit });
+	const result = await handleSearch(deps, {
+		query,
+		type,
+		concept,
+		project,
+		limit,
+	});
 	return jsonResponse(result.status, result.body);
 };
 

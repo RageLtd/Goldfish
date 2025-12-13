@@ -33,5 +33,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_on
 # Finder (MacOS) folder config
 .DS_Store
 
-# Built binaries
-plugin/bin
+# Built binaries (downloaded at runtime)
+plugin/bin/claude-mem
+plugin/bin/claude-mem-*
