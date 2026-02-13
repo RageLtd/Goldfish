@@ -24,43 +24,46 @@ const EVICTION_INTERVAL_MS = 5 * 60 * 1000;
 // ============================================================================
 
 export interface ActiveSession {
-	readonly sessionDbId: number;
-	readonly claudeSessionId: string;
-	readonly project: string;
-	readonly userPrompt: string;
-	readonly startedAt: number;
-	readonly abortController: AbortController;
+  readonly sessionDbId: number;
+  readonly claudeSessionId: string;
+  readonly project: string;
+  readonly userPrompt: string;
+  readonly startedAt: number;
+  readonly abortController: AbortController;
 }
 
 export type PendingMessageType = "observation" | "summarize" | "continuation";
 
 export interface PendingMessage {
-	readonly type: PendingMessageType;
-	readonly data: ObservationMessage | SummarizeMessage | ContinuationMessage;
+  readonly type: PendingMessageType;
+  readonly data: ObservationMessage | SummarizeMessage | ContinuationMessage;
 }
 
 export interface ObservationMessage {
-	readonly observation: ToolObservation;
+  readonly observation: ToolObservation;
 }
 
 export interface SummarizeMessage {
-	readonly lastUserMessage: string;
-	readonly lastAssistantMessage?: string;
+  readonly lastUserMessage: string;
+  readonly lastAssistantMessage?: string;
 }
 
 export interface ContinuationMessage {
-	readonly userPrompt: string;
-	readonly promptNumber: number;
+  readonly userPrompt: string;
+  readonly promptNumber: number;
 }
 
 interface SessionState {
-	readonly session: ActiveSession;
-	readonly messageQueue: PendingMessage[];
-	readonly waitingResolvers: Array<
-		(value: IteratorResult<PendingMessage>) => void
-	>;
-	lastActivityAt: number;
-	closed: boolean;
+  readonly session: ActiveSession;
+  readonly messageQueue: PendingMessage[];
+  readonly waitingResolvers: Array<
+    (value: IteratorResult<PendingMessage>) => void
+  >;
+  lastActivityAt: number;
+  closed: boolean;
+  pendingBatch: ToolObservation[];
+  batchToolName: string | null;
+  batchTimer: ReturnType<typeof setTimeout> | null;
 }
 
 // ============================================================================
@@ -68,38 +71,38 @@ interface SessionState {
 // ============================================================================
 
 export interface SessionManager {
-	readonly initializeSession: (
-		sessionDbId: number,
-		claudeSessionId: string,
-		project: string,
-		userPrompt: string,
-	) => ActiveSession;
-	readonly getSession: (sessionDbId: number) => ActiveSession | null;
-	readonly queueObservation: (
-		sessionDbId: number,
-		observation: ToolObservation,
-	) => boolean;
-	readonly queueSummarize: (
-		sessionDbId: number,
-		lastUserMessage: string,
-		lastAssistantMessage?: string,
-	) => boolean;
-	readonly queueContinuation: (
-		sessionDbId: number,
-		userPrompt: string,
-		promptNumber: number,
-	) => boolean;
-	readonly getMessageIterator: (
-		sessionDbId: number,
-	) => AsyncIterableIterator<PendingMessage> | null;
-	readonly closeSession: (sessionDbId: number) => boolean;
-	readonly getActiveSessions: () => readonly ActiveSession[];
-	/** Starts the periodic eviction sweep for idle/abandoned sessions */
-	readonly startEvictionSweep: () => void;
-	/** Stops the periodic eviction sweep */
-	readonly stopEvictionSweep: () => void;
-	/** Manually runs eviction (for testing) */
-	readonly evictStaleSessions: () => number;
+  readonly initializeSession: (
+    sessionDbId: number,
+    claudeSessionId: string,
+    project: string,
+    userPrompt: string,
+  ) => ActiveSession;
+  readonly getSession: (sessionDbId: number) => ActiveSession | null;
+  readonly queueObservation: (
+    sessionDbId: number,
+    observation: ToolObservation,
+  ) => boolean;
+  readonly queueSummarize: (
+    sessionDbId: number,
+    lastUserMessage: string,
+    lastAssistantMessage?: string,
+  ) => boolean;
+  readonly queueContinuation: (
+    sessionDbId: number,
+    userPrompt: string,
+    promptNumber: number,
+  ) => boolean;
+  readonly getMessageIterator: (
+    sessionDbId: number,
+  ) => AsyncIterableIterator<PendingMessage> | null;
+  readonly closeSession: (sessionDbId: number) => boolean;
+  readonly getActiveSessions: () => readonly ActiveSession[];
+  /** Starts the periodic eviction sweep for idle/abandoned sessions */
+  readonly startEvictionSweep: () => void;
+  /** Stops the periodic eviction sweep */
+  readonly stopEvictionSweep: () => void;
+  /** Manually runs eviction (for testing) */
+  readonly evictStaleSessions: () => number;
 }
 
 // ============================================================================
@@ -107,224 +110,290 @@ export interface SessionManager {
 // ============================================================================
 
 export const createSessionManager = (): SessionManager => {
-	const sessions = new Map<number, SessionState>();
+  const sessions = new Map<number, SessionState>();
 
-	const initializeSession = (
-		sessionDbId: number,
-		claudeSessionId: string,
-		project: string,
-		userPrompt: string,
-	): ActiveSession => {
-		const existing = sessions.get(sessionDbId);
-		if (existing) {
-			return existing.session;
-		}
+  const BATCH_WINDOW_MS = Number.parseInt(
+    process.env.CLAUDE_MEM_BATCH_WINDOW_MS || "3000",
+    10,
+  );
 
-		const session: ActiveSession = {
-			sessionDbId,
-			claudeSessionId,
-			project,
-			userPrompt,
-			startedAt: Date.now(),
-			abortController: new AbortController(),
-		};
+  const initializeSession = (
+    sessionDbId: number,
+    claudeSessionId: string,
+    project: string,
+    userPrompt: string,
+  ): ActiveSession => {
+    const existing = sessions.get(sessionDbId);
+    if (existing) {
+      return existing.session;
+    }
 
-		const state: SessionState = {
-			session,
-			messageQueue: [],
-			waitingResolvers: [],
-			lastActivityAt: Date.now(),
-			closed: false,
-		};
+    const session: ActiveSession = {
+      sessionDbId,
+      claudeSessionId,
+      project,
+      userPrompt,
+      startedAt: Date.now(),
+      abortController: new AbortController(),
+    };
 
-		sessions.set(sessionDbId, state);
-		return session;
-	};
+    const state: SessionState = {
+      session,
+      messageQueue: [],
+      waitingResolvers: [],
+      lastActivityAt: Date.now(),
+      closed: false,
+      pendingBatch: [],
+      batchToolName: null,
+      batchTimer: null,
+    };
 
-	const getSession = (sessionDbId: number): ActiveSession | null => {
-		return sessions.get(sessionDbId)?.session ?? null;
-	};
+    sessions.set(sessionDbId, state);
+    return session;
+  };
 
-	const enqueueMessage = (
-		sessionDbId: number,
-		message: PendingMessage,
-	): boolean => {
-		const state = sessions.get(sessionDbId);
-		if (!state || state.closed) {
-			return false;
-		}
+  const getSession = (sessionDbId: number): ActiveSession | null => {
+    return sessions.get(sessionDbId)?.session ?? null;
+  };
 
-		// Update last activity timestamp
-		state.lastActivityAt = Date.now();
+  const enqueueMessage = (
+    sessionDbId: number,
+    message: PendingMessage,
+  ): boolean => {
+    const state = sessions.get(sessionDbId);
+    if (!state || state.closed) {
+      return false;
+    }
 
-		const resolver = state.waitingResolvers.shift();
-		if (resolver) {
-			resolver({ value: message, done: false });
-		} else {
-			state.messageQueue.push(message);
-		}
+    // Update last activity timestamp
+    state.lastActivityAt = Date.now();
 
-		return true;
-	};
+    const resolver = state.waitingResolvers.shift();
+    if (resolver) {
+      resolver({ value: message, done: false });
+    } else {
+      state.messageQueue.push(message);
+    }
 
-	const queueObservation = (
-		sessionDbId: number,
-		observation: ToolObservation,
-	): boolean => {
-		return enqueueMessage(sessionDbId, {
-			type: "observation",
-			data: { observation },
-		});
-	};
+    return true;
+  };
 
-	const queueSummarize = (
-		sessionDbId: number,
-		lastUserMessage: string,
-		lastAssistantMessage?: string,
-	): boolean => {
-		return enqueueMessage(sessionDbId, {
-			type: "summarize",
-			data: { lastUserMessage, lastAssistantMessage },
-		});
-	};
+  const flushBatch = (sessionDbId: number): void => {
+    const state = sessions.get(sessionDbId);
+    if (!state || state.pendingBatch.length === 0) return;
 
-	const queueContinuation = (
-		sessionDbId: number,
-		userPrompt: string,
-		promptNumber: number,
-	): boolean => {
-		return enqueueMessage(sessionDbId, {
-			type: "continuation",
-			data: { userPrompt, promptNumber },
-		});
-	};
+    if (state.pendingBatch.length === 1) {
+      enqueueMessage(sessionDbId, {
+        type: "observation",
+        data: { observation: state.pendingBatch[0] },
+      });
+    } else {
+      const merged: ToolObservation = {
+        toolName: state.batchToolName || state.pendingBatch[0].toolName,
+        toolInput: state.pendingBatch.map((o) => o.toolInput),
+        toolResponse: state.pendingBatch.map((o) => o.toolResponse),
+        cwd: state.pendingBatch[0].cwd,
+        occurredAt: state.pendingBatch[0].occurredAt,
+      };
+      enqueueMessage(sessionDbId, {
+        type: "observation",
+        data: { observation: merged },
+      });
+    }
 
-	const getMessageIterator = (
-		sessionDbId: number,
-	): AsyncIterableIterator<PendingMessage> | null => {
-		const state = sessions.get(sessionDbId);
-		if (!state) {
-			return null;
-		}
+    state.pendingBatch = [];
+    state.batchToolName = null;
+    state.batchTimer = null;
+  };
 
-		return {
-			[Symbol.asyncIterator]() {
-				return this;
-			},
+  const queueObservation = (
+    sessionDbId: number,
+    observation: ToolObservation,
+  ): boolean => {
+    const state = sessions.get(sessionDbId);
+    if (!state || state.closed) return false;
 
-			next(): Promise<IteratorResult<PendingMessage>> {
-				if (state.closed) {
-					return Promise.resolve({ value: undefined, done: true });
-				}
+    state.lastActivityAt = Date.now();
 
-				const message = state.messageQueue.shift();
-				if (message) {
-					return Promise.resolve({ value: message, done: false });
-				}
+    // Check if this can be added to the current batch
+    if (
+      state.batchToolName === observation.toolName &&
+      state.pendingBatch.length > 0
+    ) {
+      state.pendingBatch.push(observation);
+      return true;
+    }
 
-				return new Promise((resolve) => {
-					state.waitingResolvers.push(resolve);
-				});
-			},
+    // Different tool type — flush existing batch first
+    if (state.pendingBatch.length > 0) {
+      if (state.batchTimer) clearTimeout(state.batchTimer);
+      flushBatch(sessionDbId);
+    }
 
-			return(): Promise<IteratorResult<PendingMessage>> {
-				state.closed = true;
-				for (const resolver of state.waitingResolvers) {
-					resolver({ value: undefined, done: true });
-				}
-				state.waitingResolvers.length = 0;
-				return Promise.resolve({ value: undefined, done: true });
-			},
-		};
-	};
+    // Start new batch
+    state.pendingBatch = [observation];
+    state.batchToolName = observation.toolName;
+    state.batchTimer = setTimeout(() => {
+      flushBatch(sessionDbId);
+    }, BATCH_WINDOW_MS);
 
-	const closeSession = (sessionDbId: number): boolean => {
-		const state = sessions.get(sessionDbId);
-		if (!state) {
-			return false;
-		}
+    return true;
+  };
 
-		state.closed = true;
-		state.session.abortController.abort();
+  const queueSummarize = (
+    sessionDbId: number,
+    lastUserMessage: string,
+    lastAssistantMessage?: string,
+  ): boolean => {
+    return enqueueMessage(sessionDbId, {
+      type: "summarize",
+      data: { lastUserMessage, lastAssistantMessage },
+    });
+  };
 
-		for (const resolver of state.waitingResolvers) {
-			resolver({ value: undefined, done: true });
-		}
-		state.waitingResolvers.length = 0;
+  const queueContinuation = (
+    sessionDbId: number,
+    userPrompt: string,
+    promptNumber: number,
+  ): boolean => {
+    return enqueueMessage(sessionDbId, {
+      type: "continuation",
+      data: { userPrompt, promptNumber },
+    });
+  };
 
-		sessions.delete(sessionDbId);
-		return true;
-	};
+  const getMessageIterator = (
+    sessionDbId: number,
+  ): AsyncIterableIterator<PendingMessage> | null => {
+    const state = sessions.get(sessionDbId);
+    if (!state) {
+      return null;
+    }
 
-	const getActiveSessions = (): readonly ActiveSession[] => {
-		return Array.from(sessions.values()).map((s) => s.session);
-	};
+    return {
+      [Symbol.asyncIterator]() {
+        return this;
+      },
 
-	/**
-	 * Evicts stale sessions based on TTL and max session limit.
-	 * Returns the number of sessions evicted.
-	 */
-	const evictStaleSessions = (): number => {
-		const now = Date.now();
-		let evictedCount = 0;
+      next(): Promise<IteratorResult<PendingMessage>> {
+        if (state.closed) {
+          return Promise.resolve({ value: undefined, done: true });
+        }
 
-		// First pass: evict sessions that have exceeded TTL
-		for (const [sessionDbId, state] of sessions) {
-			const idleTime = now - state.lastActivityAt;
-			if (idleTime > DEFAULT_SESSION_TTL_MS) {
-				closeSession(sessionDbId);
-				evictedCount++;
-			}
-		}
+        const message = state.messageQueue.shift();
+        if (message) {
+          return Promise.resolve({ value: message, done: false });
+        }
 
-		// Second pass: if still over limit, evict oldest (LRU)
-		if (sessions.size > MAX_ACTIVE_SESSIONS) {
-			const sortedByActivity = Array.from(sessions.entries()).sort(
-				([, a], [, b]) => a.lastActivityAt - b.lastActivityAt,
-			);
+        return new Promise((resolve) => {
+          state.waitingResolvers.push(resolve);
+        });
+      },
 
-			const toEvict = sortedByActivity.slice(
-				0,
-				sessions.size - MAX_ACTIVE_SESSIONS,
-			);
-			for (const [sessionDbId] of toEvict) {
-				closeSession(sessionDbId);
-				evictedCount++;
-			}
-		}
+      return(): Promise<IteratorResult<PendingMessage>> {
+        state.closed = true;
+        for (const resolver of state.waitingResolvers) {
+          resolver({ value: undefined, done: true });
+        }
+        state.waitingResolvers.length = 0;
+        return Promise.resolve({ value: undefined, done: true });
+      },
+    };
+  };
 
-		return evictedCount;
-	};
+  const closeSession = (sessionDbId: number): boolean => {
+    const state = sessions.get(sessionDbId);
+    if (!state) {
+      return false;
+    }
 
-	let evictionInterval: ReturnType<typeof setInterval> | null = null;
+    // Flush any pending observation batch before closing
+    if (state.batchTimer) clearTimeout(state.batchTimer);
+    if (state.pendingBatch.length > 0) {
+      flushBatch(sessionDbId);
+    }
 
-	const startEvictionSweep = (): void => {
-		if (evictionInterval) {
-			return; // Already running
-		}
-		evictionInterval = setInterval(() => {
-			evictStaleSessions();
-		}, EVICTION_INTERVAL_MS);
-	};
+    state.closed = true;
+    state.session.abortController.abort();
 
-	const stopEvictionSweep = (): void => {
-		if (evictionInterval) {
-			clearInterval(evictionInterval);
-			evictionInterval = null;
-		}
-	};
+    for (const resolver of state.waitingResolvers) {
+      resolver({ value: undefined, done: true });
+    }
+    state.waitingResolvers.length = 0;
 
-	return {
-		initializeSession,
-		getSession,
-		queueObservation,
-		queueSummarize,
-		queueContinuation,
-		getMessageIterator,
-		closeSession,
-		getActiveSessions,
-		startEvictionSweep,
-		stopEvictionSweep,
-		evictStaleSessions,
-	};
+    sessions.delete(sessionDbId);
+    return true;
+  };
+
+  const getActiveSessions = (): readonly ActiveSession[] => {
+    return Array.from(sessions.values()).map((s) => s.session);
+  };
+
+  /**
+   * Evicts stale sessions based on TTL and max session limit.
+   * Returns the number of sessions evicted.
+   */
+  const evictStaleSessions = (): number => {
+    const now = Date.now();
+    let evictedCount = 0;
+
+    // First pass: evict sessions that have exceeded TTL
+    for (const [sessionDbId, state] of sessions) {
+      const idleTime = now - state.lastActivityAt;
+      if (idleTime > DEFAULT_SESSION_TTL_MS) {
+        closeSession(sessionDbId);
+        evictedCount++;
+      }
+    }
+
+    // Second pass: if still over limit, evict oldest (LRU)
+    if (sessions.size > MAX_ACTIVE_SESSIONS) {
+      const sortedByActivity = Array.from(sessions.entries()).sort(
+        ([, a], [, b]) => a.lastActivityAt - b.lastActivityAt,
+      );
+
+      const toEvict = sortedByActivity.slice(
+        0,
+        sessions.size - MAX_ACTIVE_SESSIONS,
+      );
+      for (const [sessionDbId] of toEvict) {
+        closeSession(sessionDbId);
+        evictedCount++;
+      }
+    }
+
+    return evictedCount;
+  };
+
+  let evictionInterval: ReturnType<typeof setInterval> | null = null;
+
+  const startEvictionSweep = (): void => {
+    if (evictionInterval) {
+      return; // Already running
+    }
+    evictionInterval = setInterval(() => {
+      evictStaleSessions();
+    }, EVICTION_INTERVAL_MS);
+  };
+
+  const stopEvictionSweep = (): void => {
+    if (evictionInterval) {
+      clearInterval(evictionInterval);
+      evictionInterval = null;
+    }
+  };
+
+  return {
+    initializeSession,
+    getSession,
+    queueObservation,
+    queueSummarize,
+    queueContinuation,
+    getMessageIterator,
+    closeSession,
+    getActiveSessions,
+    startEvictionSweep,
+    stopEvictionSweep,
+    evictStaleSessions,
+  };
 };

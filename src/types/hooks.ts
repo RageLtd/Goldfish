@@ -8,38 +8,38 @@
 // ============================================================================
 
 export interface SessionStartInput {
-	readonly session_id?: string;
-	readonly transcript_path?: string;
-	readonly cwd?: string;
-	readonly source?: "startup" | "resume" | "clear" | "compact";
+  readonly session_id?: string;
+  readonly transcript_path?: string;
+  readonly cwd?: string;
+  readonly source?: "startup" | "resume" | "clear" | "compact";
 }
 
 export interface UserPromptSubmitInput {
-	readonly session_id: string;
-	readonly cwd: string;
-	readonly prompt: string;
+  readonly session_id: string;
+  readonly cwd: string;
+  readonly prompt: string;
 }
 
 export interface PostToolUseInput {
-	readonly session_id: string;
-	readonly cwd: string;
-	readonly tool_name: string;
-	readonly tool_input: unknown;
-	readonly tool_response: unknown;
+  readonly session_id: string;
+  readonly cwd: string;
+  readonly tool_name: string;
+  readonly tool_input: unknown;
+  readonly tool_response: unknown;
 }
 
 export interface StopInput {
-	readonly session_id: string;
-	readonly cwd: string;
-	readonly transcript_path?: string;
+  readonly session_id: string;
+  readonly cwd: string;
+  readonly transcript_path?: string;
 }
 
 export interface SessionEndInput {
-	readonly session_id: string;
-	readonly cwd: string;
-	readonly transcript_path?: string;
-	readonly hook_event_name: string;
-	readonly reason: "exit" | "clear" | "logout" | "prompt_input_exit" | "other";
+  readonly session_id: string;
+  readonly cwd: string;
+  readonly transcript_path?: string;
+  readonly hook_event_name: string;
+  readonly reason: "exit" | "clear" | "logout" | "prompt_input_exit" | "other";
 }
 
 // ============================================================================
@@ -47,14 +47,14 @@ export interface SessionEndInput {
 // ============================================================================
 
 export interface HookOutput {
-	readonly continue: boolean;
-	readonly suppressOutput?: boolean;
-	readonly systemMessage?: string; // Displayed to user as warning/info
-	readonly hookSpecificOutput?: {
-		readonly hookEventName?: string;
-		readonly additionalContext?: string;
-		readonly error?: string;
-	};
+  readonly continue: boolean;
+  readonly suppressOutput?: boolean;
+  readonly systemMessage?: string; // Displayed to user as warning/info
+  readonly hookSpecificOutput?: {
+    readonly hookEventName?: string;
+    readonly additionalContext?: string;
+    readonly error?: string;
+  };
 }
 
 // ============================================================================
@@ -62,30 +62,30 @@ export interface HookOutput {
 // ============================================================================
 
 export const createSuccessOutput = (suppressOutput = true): HookOutput => ({
-	continue: true,
-	suppressOutput,
+  continue: true,
+  suppressOutput,
 });
 
 export const createContextOutput = (
-	context: string,
-	systemMessage?: string,
+  context: string,
+  systemMessage?: string,
 ): HookOutput => ({
-	continue: true,
-	suppressOutput: false,
-	systemMessage,
-	hookSpecificOutput: {
-		hookEventName: "SessionStart",
-		additionalContext: context,
-	},
+  continue: true,
+  suppressOutput: false,
+  systemMessage,
+  hookSpecificOutput: {
+    hookEventName: "SessionStart",
+    additionalContext: context,
+  },
 });
 
 export const createErrorOutput = (
-	hookName: string,
-	error: string,
+  hookName: string,
+  error: string,
 ): HookOutput => ({
-	continue: true,
-	suppressOutput: false,
-	hookSpecificOutput: {
-		error: `[${hookName}] ${error}`,
-	},
+  continue: true,
+  suppressOutput: false,
+  hookSpecificOutput: {
+    error: `[${hookName}] ${error}`,
+  },
 });

@@ -7,9 +7,9 @@ import { processSummaryHook } from "./logic";
 import { runHook } from "./runner";
 
 export const main = () =>
-	runHook<StopInput>(processSummaryHook, "summary-hook");
+  runHook<StopInput>(processSummaryHook, "summary-hook");
 
 // Run directly if executed as script
 if (import.meta.main) {
-	main();
+  main();
 }

@@ -10,20 +10,20 @@ import type { ToolObservation } from "../types/domain";
 // ============================================================================
 
 export interface InitPromptInput {
-	readonly project: string;
-	readonly sessionId: string;
-	readonly userPrompt: string;
+  readonly project: string;
+  readonly sessionId: string;
+  readonly userPrompt: string;
 }
 
 export interface SummaryPromptInput {
-	readonly lastUserMessage: string;
-	readonly lastAssistantMessage?: string;
+  readonly lastUserMessage: string;
+  readonly lastAssistantMessage?: string;
 }
 
 export interface ContinuationPromptInput {
-	readonly userPrompt: string;
-	readonly promptNumber: number;
-	readonly sessionId: string;
+  readonly userPrompt: string;
+  readonly promptNumber: number;
+  readonly sessionId: string;
 }
 
 // ============================================================================
@@ -35,9 +35,9 @@ export interface ContinuationPromptInput {
  * Note: The system prompt (observer role) is now handled via SDK options.
  */
 export const buildInitPrompt = (input: InitPromptInput): string => {
-	const { project, sessionId, userPrompt } = input;
+  const { project, sessionId, userPrompt } = input;
 
-	return `## Session Started
+  return `## Session Started
 
 <session_context>
   <project>${project}</project>
@@ -52,11 +52,11 @@ A new Claude Code session has started. I will send you tool execution notificati
  * Builds a prompt for a tool observation from the primary session.
  */
 export const buildObservationPrompt = (
-	observation: ToolObservation,
+  observation: ToolObservation,
 ): string => {
-	const { toolName, toolInput, toolResponse, cwd, occurredAt } = observation;
+  const { toolName, toolInput, toolResponse, cwd, occurredAt } = observation;
 
-	return `<observed_from_primary_session>
+  return `<observed_from_primary_session>
   <what_happened>${toolName}</what_happened>
   <occurred_at>${occurredAt}</occurred_at>
   <working_directory>${cwd}</working_directory>
@@ -71,9 +71,9 @@ Analyze this tool execution. If it represents meaningful work (not routine opera
  * Builds a prompt requesting a session summary.
  */
 export const buildSummaryPrompt = (input: SummaryPromptInput): string => {
-	const { lastUserMessage, lastAssistantMessage } = input;
+  const { lastUserMessage, lastAssistantMessage } = input;
 
-	return `## PROGRESS SUMMARY CHECKPOINT
+  return `## PROGRESS SUMMARY CHECKPOINT
 
 The session is pausing. Generate a summary of what was accomplished.
 
@@ -98,11 +98,11 @@ Focus on OUTCOMES and DELIVERABLES, not the process of recording them.`;
  * Builds a continuation prompt for additional user messages in the same session.
  */
 export const buildContinuationPrompt = (
-	input: ContinuationPromptInput,
+  input: ContinuationPromptInput,
 ): string => {
-	const { userPrompt, promptNumber, sessionId } = input;
+  const { userPrompt, promptNumber, sessionId } = input;
 
-	return `## CONTINUATION - Prompt #${promptNumber}
+  return `## CONTINUATION - Prompt #${promptNumber}
 
 <session_id>${sessionId}</session_id>
 
