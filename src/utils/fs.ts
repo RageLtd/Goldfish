@@ -12,6 +12,6 @@ import { dirname, join } from "node:path";
  * @param filePath - Path to a file whose parent directory should exist
  */
 export const ensureDbDir = async (filePath: string): Promise<void> => {
-	const dir = dirname(filePath);
-	await Bun.write(join(dir, ".keep"), "");
+  const dir = dirname(filePath);
+  await Bun.write(join(dir, ".keep"), "");
 };

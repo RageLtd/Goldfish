@@ -4,9 +4,9 @@
  */
 
 import type {
-	ObservationType,
-	ParsedObservation,
-	ParsedSummary,
+  ObservationType,
+  ParsedObservation,
+  ParsedSummary,
 } from "../types/domain";
 import { isObservationType } from "../types/domain";
 
@@ -15,18 +15,18 @@ import { isObservationType } from "../types/domain";
  * Returns null if tag not found or content is empty/whitespace.
  */
 export const extractTagContent = (
-	xml: string,
-	tagName: string,
+  xml: string,
+  tagName: string,
 ): string | null => {
-	const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`);
-	const match = xml.match(regex);
+  const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`);
+  const match = xml.match(regex);
 
-	if (!match) {
-		return null;
-	}
+  if (!match) {
+    return null;
+  }
 
-	const content = match[1].trim();
-	return content.length > 0 ? content : null;
+  const content = match[1].trim();
+  return content.length > 0 ? content : null;
 };
 
 /**
@@ -34,55 +34,55 @@ export const extractTagContent = (
  * Example: <facts><fact>a</fact><fact>b</fact></facts> -> ['a', 'b']
  */
 export const extractTagList = (
-	xml: string,
-	containerTag: string,
-	itemTag: string,
+  xml: string,
+  containerTag: string,
+  itemTag: string,
 ): readonly string[] => {
-	const containerRegex = new RegExp(
-		`<${containerTag}>([\\s\\S]*?)<\\/${containerTag}>`,
-	);
-	const containerMatch = xml.match(containerRegex);
+  const containerRegex = new RegExp(
+    `<${containerTag}>([\\s\\S]*?)<\\/${containerTag}>`,
+  );
+  const containerMatch = xml.match(containerRegex);
 
-	if (!containerMatch) {
-		return [];
-	}
+  if (!containerMatch) {
+    return [];
+  }
 
-	const containerContent = containerMatch[1];
-	const itemRegex = new RegExp(`<${itemTag}>([\\s\\S]*?)<\\/${itemTag}>`, "g");
-	const items: string[] = [];
+  const containerContent = containerMatch[1];
+  const itemRegex = new RegExp(`<${itemTag}>([\\s\\S]*?)<\\/${itemTag}>`, "g");
+  const items: string[] = [];
 
-	for (const match of containerContent.matchAll(itemRegex)) {
-		const item = match[1].trim();
-		if (item.length > 0) {
-			items.push(item);
-		}
-	}
+  for (const match of containerContent.matchAll(itemRegex)) {
+    const item = match[1].trim();
+    if (item.length > 0) {
+      items.push(item);
+    }
+  }
 
-	return items;
+  return items;
 };
 
 /**
  * Parses a single observation XML block into a ParsedObservation.
  */
 const parseObservationBlock = (block: string): ParsedObservation => {
-	const rawType = extractTagContent(block, "type");
-	const type: ObservationType =
-		rawType && isObservationType(rawType) ? rawType : "change";
+  const rawType = extractTagContent(block, "type");
+  const type: ObservationType =
+    rawType && isObservationType(rawType) ? rawType : "change";
 
-	const concepts = extractTagList(block, "concepts", "concept")
-		// Filter out the observation type from concepts (they're separate dimensions)
-		.filter((c) => c !== type);
+  const concepts = extractTagList(block, "concepts", "concept")
+    // Filter out the observation type from concepts (they're separate dimensions)
+    .filter((c) => c !== type);
 
-	return {
-		type,
-		title: extractTagContent(block, "title"),
-		subtitle: extractTagContent(block, "subtitle"),
-		narrative: extractTagContent(block, "narrative"),
-		facts: extractTagList(block, "facts", "fact"),
-		concepts,
-		filesRead: extractTagList(block, "files_read", "file"),
-		filesModified: extractTagList(block, "files_modified", "file"),
-	};
+  return {
+    type,
+    title: extractTagContent(block, "title"),
+    subtitle: extractTagContent(block, "subtitle"),
+    narrative: extractTagContent(block, "narrative"),
+    facts: extractTagList(block, "facts", "fact"),
+    concepts,
+    filesRead: extractTagList(block, "files_read", "file"),
+    filesModified: extractTagList(block, "files_modified", "file"),
+  };
 };
 
 /**
@@ -90,16 +90,16 @@ const parseObservationBlock = (block: string): ParsedObservation => {
  * Returns empty array if no observations found.
  */
 export const parseObservations = (
-	text: string,
+  text: string,
 ): readonly ParsedObservation[] => {
-	const observationRegex = /<observation>([\s\S]*?)<\/observation>/g;
-	const observations: ParsedObservation[] = [];
+  const observationRegex = /<observation>([\s\S]*?)<\/observation>/g;
+  const observations: ParsedObservation[] = [];
 
-	for (const match of text.matchAll(observationRegex)) {
-		observations.push(parseObservationBlock(match[1]));
-	}
+  for (const match of text.matchAll(observationRegex)) {
+    observations.push(parseObservationBlock(match[1]));
+  }
 
-	return observations;
+  return observations;
 };
 
 /**
@@ -107,21 +107,21 @@ export const parseObservations = (
  * Returns null if no summary found.
  */
 export const parseSummary = (text: string): ParsedSummary | null => {
-	const summaryRegex = /<summary>([\s\S]*?)<\/summary>/;
-	const match = text.match(summaryRegex);
+  const summaryRegex = /<summary>([\s\S]*?)<\/summary>/;
+  const match = text.match(summaryRegex);
 
-	if (!match) {
-		return null;
-	}
+  if (!match) {
+    return null;
+  }
 
-	const block = match[1];
+  const block = match[1];
 
-	return {
-		request: extractTagContent(block, "request"),
-		investigated: extractTagContent(block, "investigated"),
-		learned: extractTagContent(block, "learned"),
-		completed: extractTagContent(block, "completed"),
-		nextSteps: extractTagContent(block, "next_steps"),
-		notes: extractTagContent(block, "notes"),
-	};
+  return {
+    request: extractTagContent(block, "request"),
+    investigated: extractTagContent(block, "investigated"),
+    learned: extractTagContent(block, "learned"),
+    completed: extractTagContent(block, "completed"),
+    nextSteps: extractTagContent(block, "next_steps"),
+    notes: extractTagContent(block, "notes"),
+  };
 };

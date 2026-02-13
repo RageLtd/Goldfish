@@ -19,37 +19,37 @@
 import pkg from "../package.json";
 
 const COMMANDS: Record<string, () => Promise<void>> = {
-	"hook:context": async () => {
-		const { main } = await import("./hooks/context-hook");
-		await main();
-	},
-	"hook:new": async () => {
-		const { main } = await import("./hooks/new-hook");
-		await main();
-	},
-	"hook:save": async () => {
-		const { main } = await import("./hooks/save-hook");
-		await main();
-	},
-	"hook:summary": async () => {
-		const { main } = await import("./hooks/summary-hook");
-		await main();
-	},
-	"hook:cleanup": async () => {
-		const { main } = await import("./hooks/cleanup-hook");
-		await main();
-	},
-	worker: async () => {
-		const { main } = await import("./worker/main");
-		await main();
-	},
-	version: async () => {
-		console.log(`claude-mem-bun v${pkg.version}`);
-	},
+  "hook:context": async () => {
+    const { main } = await import("./hooks/context-hook");
+    await main();
+  },
+  "hook:new": async () => {
+    const { main } = await import("./hooks/new-hook");
+    await main();
+  },
+  "hook:save": async () => {
+    const { main } = await import("./hooks/save-hook");
+    await main();
+  },
+  "hook:summary": async () => {
+    const { main } = await import("./hooks/summary-hook");
+    await main();
+  },
+  "hook:cleanup": async () => {
+    const { main } = await import("./hooks/cleanup-hook");
+    await main();
+  },
+  worker: async () => {
+    const { main } = await import("./worker/main");
+    await main();
+  },
+  version: async () => {
+    console.log(`claude-mem-bun v${pkg.version}`);
+  },
 };
 
 const showHelp = () => {
-	console.log(`claude-mem-bun v${pkg.version}
+  console.log(`claude-mem-bun v${pkg.version}
 
 Usage: claude-mem <command>
 
@@ -69,24 +69,24 @@ Examples:
 };
 
 const main = async () => {
-	const command = process.argv[2];
+  const command = process.argv[2];
 
-	if (!command || command === "--help" || command === "-h") {
-		showHelp();
-		process.exit(0);
-	}
+  if (!command || command === "--help" || command === "-h") {
+    showHelp();
+    process.exit(0);
+  }
 
-	const handler = COMMANDS[command];
-	if (!handler) {
-		console.error(`Unknown command: ${command}`);
-		console.error(`Run 'claude-mem --help' for usage`);
-		process.exit(1);
-	}
+  const handler = COMMANDS[command];
+  if (!handler) {
+    console.error(`Unknown command: ${command}`);
+    console.error(`Run 'claude-mem --help' for usage`);
+    process.exit(1);
+  }
 
-	await handler();
+  await handler();
 };
 
 main().catch((error) => {
-	console.error(`Error: ${error.message}`);
-	process.exit(1);
+  console.error(`Error: ${error.message}`);
+  process.exit(1);
 });

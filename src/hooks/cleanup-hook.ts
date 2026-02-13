@@ -7,9 +7,9 @@ import { processCleanupHook } from "./logic";
 import { runHook } from "./runner";
 
 export const main = () =>
-	runHook<SessionEndInput>(processCleanupHook, "cleanup-hook");
+  runHook<SessionEndInput>(processCleanupHook, "cleanup-hook");
 
 // Run directly if executed as script
 if (import.meta.main) {
-	main();
+  main();
 }
