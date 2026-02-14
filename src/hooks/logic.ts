@@ -132,6 +132,81 @@ export const getContentLength = (
 };
 
 // ============================================================================
+// Formatting Helpers
+// ============================================================================
+
+/**
+ * Pluralizes a type name: "decision" → "decisions", "bugfix" → "bugfixes".
+ * Handles common English rules for the type names we use.
+ */
+const pluralize = (word: string, count: number): string => {
+  if (count === 1) return word;
+  if (word.endsWith("x")) return `${word}es`;
+  if (word.endsWith("y")) return `${word.slice(0, -1)}ies`;
+  return `${word}s`;
+};
+
+/**
+ * Builds a source-aware system message summarizing loaded context.
+ *
+ * Used by processContextHook to communicate what was loaded to the user.
+ */
+export const formatSystemMessage = (
+  source: string | undefined,
+  observationCount: number,
+  summaryCount: number,
+  typeCounts: Record<string, number>,
+): string => {
+  const hasObservations = observationCount > 0;
+  const hasSummaries = summaryCount > 0;
+
+  // Neither observations nor summaries
+  if (!hasObservations && !hasSummaries) {
+    return "[claude-mem] No previous context for this project";
+  }
+
+  // No observations but has summaries
+  if (!hasObservations && hasSummaries) {
+    const noun = pluralize("summary", summaryCount);
+    return `[claude-mem] ${summaryCount} session ${noun} loaded`;
+  }
+
+  // Determine source prefix
+  let prefix: string;
+  switch (source) {
+    case "clear":
+      prefix = "[claude-mem] Fresh session \u2014 ";
+      break;
+    case "resume":
+      prefix = "[claude-mem] Resumed \u2014 ";
+      break;
+    case "compact":
+      prefix = "[claude-mem] Compacted \u2014 ";
+      break;
+    default:
+      // "startup" or undefined
+      prefix = "[claude-mem] ";
+      break;
+  }
+
+  // Build type breakdown (only non-zero counts)
+  const breakdown = Object.entries(typeCounts)
+    .filter(([, count]) => count > 0)
+    .map(([type, count]) => `${count} ${pluralize(type, count)}`)
+    .join(", ");
+
+  let message = `${prefix}${observationCount} memories loaded (${breakdown})`;
+
+  // Append summaries if present
+  if (hasSummaries) {
+    const noun = pluralize("summary", summaryCount);
+    message += ` + ${summaryCount} session ${noun}`;
+  }
+
+  return message;
+};
+
+// ============================================================================
 // Hook Processors
 // ============================================================================
 
@@ -167,16 +242,17 @@ export const processContextHook = async (
     context?: string;
     observationCount?: number;
     summaryCount?: number;
+    typeCounts?: Record<string, number>;
     format?: string;
   };
 
   if (result.context?.trim()) {
-    // Determine system message based on whether we have actual context
-    const hasContext =
-      (result.observationCount ?? 0) > 0 || (result.summaryCount ?? 0) > 0;
-    const systemMessage = hasContext
-      ? "[claude-mem] Loaded context from previous sessions"
-      : "[claude-mem] Starting fresh session (no previous context)";
+    const systemMessage = formatSystemMessage(
+      input.source,
+      result.observationCount ?? 0,
+      result.summaryCount ?? 0,
+      result.typeCounts ?? {},
+    );
 
     return createContextOutput(result.context, systemMessage);
   }

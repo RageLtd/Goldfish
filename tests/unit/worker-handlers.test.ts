@@ -185,6 +185,83 @@ describe("worker handlers", () => {
       });
 
       expect(result.status).toBe(200);
+      expect(result.body.typeCounts).toEqual({});
+    });
+
+    it("returns typeCounts with correct counts per observation type", async () => {
+      // Setup: create session and store observations with different types
+      createSession(db, {
+        claudeSessionId: "claude-ctx-types",
+        project: "type-counts-project",
+        userPrompt: "Test type counts",
+      });
+
+      const makeObservation = (type: string) => ({
+        type: type as
+          | "decision"
+          | "bugfix"
+          | "feature"
+          | "refactor"
+          | "discovery"
+          | "change",
+        title: `Test ${type}`,
+        subtitle: null,
+        narrative: null,
+        facts: [],
+        concepts: [],
+        filesRead: [],
+        filesModified: [],
+      });
+
+      // Store 3 decisions, 2 bugfixes, 1 feature
+      storeObservation(db, {
+        claudeSessionId: "claude-ctx-types",
+        project: "type-counts-project",
+        observation: makeObservation("decision"),
+        promptNumber: 1,
+      });
+      storeObservation(db, {
+        claudeSessionId: "claude-ctx-types",
+        project: "type-counts-project",
+        observation: makeObservation("decision"),
+        promptNumber: 1,
+      });
+      storeObservation(db, {
+        claudeSessionId: "claude-ctx-types",
+        project: "type-counts-project",
+        observation: makeObservation("decision"),
+        promptNumber: 1,
+      });
+      storeObservation(db, {
+        claudeSessionId: "claude-ctx-types",
+        project: "type-counts-project",
+        observation: makeObservation("bugfix"),
+        promptNumber: 1,
+      });
+      storeObservation(db, {
+        claudeSessionId: "claude-ctx-types",
+        project: "type-counts-project",
+        observation: makeObservation("bugfix"),
+        promptNumber: 1,
+      });
+      storeObservation(db, {
+        claudeSessionId: "claude-ctx-types",
+        project: "type-counts-project",
+        observation: makeObservation("feature"),
+        promptNumber: 1,
+      });
+
+      const result = await handleGetContext(deps, {
+        project: "type-counts-project",
+        limit: 50,
+      });
+
+      expect(result.status).toBe(200);
+      expect(result.body.typeCounts).toEqual({
+        decision: 3,
+        bugfix: 2,
+        feature: 1,
+      });
     });
   });
 
