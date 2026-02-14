@@ -26,7 +26,7 @@ jobs:
         run: bun run tsc --noEmit
 
       - name: Run linter
-        run: bunx @biomejs/biome check .
+        run: bunx @biomejs/biome check --fix .
 
       - name: Run tests
         run: bun test

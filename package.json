@@ -1,27 +1,27 @@
 {
-	"name": "claude-mem-bun",
-	"version": "1.2.0",
-	"module": "src/index.ts",
-	"type": "module",
-	"private": true,
-	"scripts": {
-		"build": "bun scripts/build.ts",
-		"dev:install": "./scripts/dev-install.sh",
-		"test": "bun test tests/",
-		"test:unit": "bun test tests/unit/",
-		"worker:start": "bun src/worker/main.ts",
-		"worker:start:bin": "./bin/worker",
-		"release": "bun scripts/release.ts",
-		"release:dry": "bun scripts/release.ts --dry-run"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "^2.3.8",
-		"@types/bun": "latest"
-	},
-	"peerDependencies": {
-		"typescript": "^5.9.3"
-	},
-	"dependencies": {
-		"@anthropic-ai/claude-agent-sdk": "^0.1.62"
-	}
+  "name": "claude-mem-bun",
+  "version": "1.2.0",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "dev:install": "./scripts/dev-install.sh",
+    "test": "bun test tests/",
+    "test:unit": "bun test tests/unit/",
+    "worker:start": "bun src/worker/main.ts",
+    "worker:start:bin": "./bin/worker",
+    "release": "bun scripts/release.ts",
+    "release:dry": "bun scripts/release.ts --dry-run"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.8",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.62"
+  }
 }

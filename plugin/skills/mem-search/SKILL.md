@@ -35,6 +35,19 @@ The index format shows:
 - User asks about decisions: "Why did we choose this approach?", "What architectural decisions?"
 - You need implementation details from an observation in the index
 
+## Display Rule
+
+When presenting search results to the user, **always start with a one-line summary** of what was found before showing details. This gives the user immediate visibility into what context is available.
+
+**Format:** "Found N observations: X decisions, Y features, Z bugfixes, ..."
+
+Examples:
+- "Found 8 observations: 3 decisions, 2 features, 2 discoveries, 1 bugfix"
+- "Found 3 observations matching 'authentication': 2 features, 1 decision"
+- "No observations found matching 'payment gateway'"
+
+Only list non-zero types. Always show the summary before presenting the index table or details.
+
 ## API Endpoints
 
 The worker service runs on `http://localhost:3456`. Use curl to query it.
@@ -163,7 +176,8 @@ Context endpoint returns:
   "context": "# project recent context\n...",
   "observationCount": 10,
   "summaryCount": 3,
-  "format": "index"
+  "format": "index",
+  "typeCounts": { "decision": 3, "feature": 5, "bugfix": 1, "discovery": 1 }
 }
 ```
 

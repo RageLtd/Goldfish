@@ -523,6 +523,12 @@ export const handleGetContext = async (
 
   const observations = scored.map((s) => s.observation);
 
+  // Compute type counts from scored/filtered observations
+  const typeCounts: Record<string, number> = {};
+  for (const obs of observations) {
+    typeCounts[obs.type] = (typeCounts[obs.type] ?? 0) + 1;
+  }
+
   // Get summaries (still project-scoped)
   const summariesResult = getRecentSummaries(deps.db, { project, limit });
   if (!summariesResult.ok) {
@@ -544,6 +550,7 @@ export const handleGetContext = async (
         context: `# ${project} recent context\n\nNo previous sessions found for this project yet.`,
         observationCount: 0,
         summaryCount: 0,
+        typeCounts: {},
         format,
       },
     };
@@ -560,6 +567,7 @@ export const handleGetContext = async (
       context,
       observationCount: observations.length,
       summaryCount: summaries.length,
+      typeCounts,
       format,
     },
   };
