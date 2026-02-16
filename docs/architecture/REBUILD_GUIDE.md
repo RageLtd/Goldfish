@@ -172,7 +172,7 @@ The worker is automatically started by hooks when needed. No external process ma
 
 ### 3.1 Hook Configuration
 
-Create `plugin/hooks/hooks.json`:
+Create `hooks/hooks.json`:
 
 ```json
 {
@@ -326,7 +326,7 @@ const hookEntries = [
 for (const hook of hookEntries) {
   await Bun.build({
     entrypoints: [hook.source],
-    outdir: 'plugin/scripts',
+    outdir: 'scripts/',
     target: 'bun',
     format: 'esm',
     minify: true
@@ -336,7 +336,7 @@ for (const hook of hookEntries) {
 // Worker service (CJS bundle)
 await Bun.build({
   entrypoints: ['src/services/worker-service.ts'],
-  outdir: 'plugin/scripts',
+  outdir: 'scripts/',
   target: 'bun',
   format: 'cjs',
   minify: true
@@ -350,7 +350,7 @@ await Bun.build({
   "scripts": {
     "build": "bun scripts/build.ts",
     "test": "bun test",
-    "worker": "./plugin/bin/claude-mem worker"
+    "worker": "./bin/claude-mem worker"
   }
 }
 ```
@@ -413,9 +413,9 @@ claude-mem/
 │   │   └── sqlite/         # Database layer
 │   ├── sdk/                # Prompts and parser
 │   └── utils/              # Shared utilities
-├── plugin/
-│   ├── hooks/hookson
-│   └── scripts/            # Built JavaScript
+├── hooks/hookson          # Hook configuration
+├── commands/                 # Slash commands
+├── skills/                   # Plugin skills
 ├── scripts/                # Build scripts
 ├── tests/                  # Test suites
 ├── docs/architecture/      # This documentation
@@ -435,5 +435,5 @@ bun run build
 bun test
 
 # Start worker manually (auto-started by hooks)
-./plugin/bin/claude-mem worker
+./bin/claude-mem worker
 ```

@@ -175,9 +175,7 @@ const updatePackageJson = (newVersion: string): void => {
 };
 
 // Plugin JSON files that contain a "version" field to keep in sync
-const PLUGIN_VERSION_FILES = [
-  "plugin/.claude-plugin/plugin.json",
-];
+const PLUGIN_VERSION_FILES = [".claude-plugin/plugin.json"];
 
 const MARKETPLACE_FILE = ".claude-plugin/marketplace.json";
 

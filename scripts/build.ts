@@ -6,7 +6,7 @@
 
 const ROOT_DIR = import.meta.dir.replace("/scripts", "");
 const SRC_DIR = `${ROOT_DIR}/src`;
-const OUT_DIR = `${ROOT_DIR}/plugin/bin`;
+const OUT_DIR = `${ROOT_DIR}/bin`;
 
 const log = (msg: string) => console.log(`[build] ${msg}`);
 const error = (msg: string) => console.error(`[build] ERROR: ${msg}`);
@@ -43,12 +43,12 @@ const build = async (): Promise<void> => {
   log(`Build completed! Binary at ${outfile}`);
   log("");
   log("Usage:");
-  log("  ./plugin/bin/claude-mem hook:context   # SessionStart hook");
-  log("  ./plugin/bin/claude-mem hook:new       # UserPromptSubmit hook");
-  log("  ./plugin/bin/claude-mem hook:save      # PostToolUse hook");
-  log("  ./plugin/bin/claude-mem hook:summary   # Stop hook");
-  log("  ./plugin/bin/claude-mem hook:cleanup   # SessionEnd hook");
-  log("  ./plugin/bin/claude-mem worker         # Start worker service");
+  log("  ./bin/claude-mem hook:context   # SessionStart hook");
+  log("  ./bin/claude-mem hook:new       # UserPromptSubmit hook");
+  log("  ./bin/claude-mem hook:save      # PostToolUse hook");
+  log("  ./bin/claude-mem hook:summary   # Stop hook");
+  log("  ./bin/claude-mem hook:cleanup   # SessionEnd hook");
+  log("  ./bin/claude-mem worker         # Start worker service");
 };
 
 build();

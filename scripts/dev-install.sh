@@ -15,7 +15,7 @@ echo "[dev] Building binary..."
 cd "$PROJECT_ROOT"
 bun run build
 
-if [ ! -f "$PROJECT_ROOT/plugin/bin/claude-mem" ]; then
+if [ ! -f "$PROJECT_ROOT/bin/claude-mem" ]; then
     echo "[dev] ERROR: Build failed - binary not found"
     exit 1
 fi
@@ -26,21 +26,21 @@ mkdir -p "$PLUGIN_CACHE/scripts"
 mkdir -p "$PLUGIN_CACHE/skills"
 
 # Copy binary
-cp "$PROJECT_ROOT/plugin/bin/claude-mem" "$PLUGIN_CACHE/bin/claude-mem"
+cp "$PROJECT_ROOT/bin/claude-mem" "$PLUGIN_CACHE/bin/claude-mem"
 chmod +x "$PLUGIN_CACHE/bin/claude-mem"
 
 # Copy scripts
-cp "$PROJECT_ROOT/plugin/scripts/ensure-binary.sh" "$PLUGIN_CACHE/scripts/"
+cp "$PROJECT_ROOT/scripts/ensure-binary.sh" "$PLUGIN_CACHE/scripts/"
 chmod +x "$PLUGIN_CACHE/scripts/ensure-binary.sh"
 
 # Copy hooks
-cp "$PROJECT_ROOT/plugin/hooks/hooks.json" "$PLUGIN_CACHE/hooks/hooks.json"
+cp "$PROJECT_ROOT/hooks/hooks.json" "$PLUGIN_CACHE/hooks/hooks.json"
 
 # Copy skills
-cp -r "$PROJECT_ROOT/plugin/skills/"* "$PLUGIN_CACHE/skills/"
+cp -r "$PROJECT_ROOT/skills/"* "$PLUGIN_CACHE/skills/"
 
 # Copy plugin.json
-cp "$PROJECT_ROOT/plugin/.claude-plugin/plugin.json" "$PLUGIN_CACHE/.claude-plugin/plugin.json"
+cp "$PROJECT_ROOT/.claude-plugin/plugin.json" "$PLUGIN_CACHE/.claude-plugin/plugin.json"
 
 echo "[dev] Installed successfully!"
 echo "[dev] Binary: $PLUGIN_CACHE/bin/claude-mem"

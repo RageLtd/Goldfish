@@ -211,9 +211,9 @@ claude-mem-bun/
 │   ├── sdk/                      # Claude SDK integration
 │   │   ├── prompts.ts            # Prompt templates
 │   │   └── parser.ts             # XML response parsing
-├── plugin/                       # Built/compiled plugin
-│   ├── hooks/hookson          # Hook configuration
-│   └── scripts/                  # Compiled JavaScript
+├── hooks/hookson              # Hook configuration
+├── commands/                     # Slash commands
+├── skills/                       # Plugin skills
 ├── scripts/                      # Build scripts
 │   ├── build-hooks            # Bun.build() orchestrator
 │   └── build-viewer           # React viewer bundler
