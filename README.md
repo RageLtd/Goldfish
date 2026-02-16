@@ -153,18 +153,7 @@ bun run release:dry
 
 Each release includes pre-built binaries:
 - `claude-mem-darwin-arm64` - macOS Apple Silicon
-- `claude-mem-darwin-x64` - macOS Intel
 - `claude-mem-linux-x64` - Linux x64
-- `claude-mem-linux-arm64` - Linux ARM64
-
-## Architecture
-
-See `docs/architecture/` for detailed documentation:
-
-- `REBUILD_GUIDE.md` - Step-by-step rebuild guide
-- `HOOKS.md` - Hook system documentation
-- `DATABASE.md` - Database schema and FTS setup
-- `SDK_AGENT.md` - SDK agent and prompt templates
 
 ## Requirements
 
@@ -172,6 +161,3 @@ See `docs/architecture/` for detailed documentation:
 - **Database:** SQLite with FTS5 (built-in)
 - **Claude Code:** For hook integration
 
-## License
-
-MIT
