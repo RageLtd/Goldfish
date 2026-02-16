@@ -1,7 +1,7 @@
 {
   "name": "claude-mem-bun",
   "description": "Persistent memory system for Claude Code - context compression and recall across sessions",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "author": {
     "name": "RageLtd"
   }
