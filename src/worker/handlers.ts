@@ -7,6 +7,7 @@ import type { Database } from "bun:sqlite";
 import {
   createSession,
   getCandidateObservations,
+  getEmbeddingsByIds,
   getObservationById,
   getRecentObservations,
   getRecentSummaries,
@@ -15,17 +16,55 @@ import {
   saveUserPrompt,
   searchObservations,
   searchSummaries,
-  updateSessionStatus,
 } from "../db/index";
+import type { ModelManager } from "../models/manager";
 import {
   formatContextFull,
   formatContextIndex,
   formatObservationFull,
 } from "../utils/context-formatter";
-import { type ScoringContext, scoreObservation } from "../utils/relevance";
+import {
+  cosineSimilarity,
+  DEFAULT_SCORING_CONFIG,
+  type ScoringContext,
+  scoreObservation,
+} from "../utils/relevance";
 import { parseSince } from "../utils/temporal";
 import { escapeFts5Query, projectFromCwd } from "../utils/validation";
-import type { SessionManager } from "./session-manager";
+import type { MessageRouter } from "./message-router";
+
+// ============================================================================
+// Internal helpers
+// ============================================================================
+
+/**
+ * Enqueues embed messages for observations that lack embeddings.
+ * Used by both handleGetContext and handleSearch to backfill lazily.
+ */
+const enqueueMissingEmbeddings = (
+  router: MessageRouter,
+  observations: readonly {
+    readonly id: number;
+    readonly sdkSessionId: string;
+    readonly title: string | null;
+    readonly narrative: string | null;
+  }[],
+  existingIds: Set<number>,
+): void => {
+  for (const obs of observations) {
+    if (!existingIds.has(obs.id) && obs.title) {
+      router.enqueue({
+        type: "embed",
+        claudeSessionId: obs.sdkSessionId,
+        data: {
+          observationId: obs.id,
+          title: obs.title ?? "",
+          narrative: obs.narrative ?? "",
+        },
+      });
+    }
+  }
+};
 
 // ============================================================================
 // Types
@@ -33,7 +72,8 @@ import type { SessionManager } from "./session-manager";
 
 export interface WorkerDeps {
   readonly db: Database;
-  readonly sessionManager?: SessionManager;
+  readonly router?: MessageRouter;
+  readonly modelManager?: ModelManager;
   readonly startedAt?: number;
   readonly version?: string;
 }
@@ -117,7 +157,7 @@ export interface HealthCheckResponse {
   readonly status: string;
   readonly version: string;
   readonly uptimeSeconds: number;
-  readonly activeSessions: number;
+  readonly pendingMessages: number;
 }
 
 /**
@@ -130,7 +170,7 @@ export const handleHealth = async (
   const uptimeSeconds = deps.startedAt
     ? Math.floor((now - deps.startedAt) / 1000)
     : 0;
-  const activeSessions = deps.sessionManager?.getActiveSessions().length ?? 0;
+  const pendingMessages = deps.router?.pending() ?? 0;
 
   return {
     status: 200,
@@ -138,7 +178,7 @@ export const handleHealth = async (
       status: "ok",
       version: deps.version || "unknown",
       uptimeSeconds,
-      activeSessions,
+      pendingMessages,
     },
   };
 };
@@ -169,11 +209,9 @@ export const handleQueueObservation = async (
     };
   }
 
-  let sessionId: number;
   const project = projectFromCwd(cwd);
 
   if (!sessionResult.value) {
-    // Create session with minimal info
     const createResult = createSession(deps.db, {
       claudeSessionId,
       project,
@@ -186,39 +224,14 @@ export const handleQueueObservation = async (
         body: { error: createResult.error.message },
       };
     }
-    sessionId = createResult.value.id;
-
-    // Initialize in SessionManager if this is a new session
-    if (createResult.value.isNew && deps.sessionManager) {
-      deps.sessionManager.initializeSession(
-        sessionId,
-        claudeSessionId,
-        project,
-        "",
-      );
-    }
-  } else {
-    sessionId = sessionResult.value.id;
-
-    // Ensure session is initialized in SessionManager (may have been created by another request)
-    if (deps.sessionManager && !deps.sessionManager.getSession(sessionId)) {
-      deps.sessionManager.initializeSession(
-        sessionId,
-        claudeSessionId,
-        project,
-        "",
-      );
-    }
   }
 
-  // Queue observation in SessionManager if available
-  if (deps.sessionManager) {
-    deps.sessionManager.queueObservation(sessionId, {
-      toolName,
-      toolInput,
-      toolResponse,
-      cwd,
-      occurredAt: new Date().toISOString(),
+  // Enqueue for background processing
+  if (deps.router) {
+    deps.router.enqueue({
+      type: "observation",
+      claudeSessionId,
+      data: { toolName, toolInput, toolResponse, cwd },
     });
   }
 
@@ -263,7 +276,6 @@ export const handleQueuePrompt = async (
   const project = projectFromCwd(cwd);
 
   if (!sessionResult.value) {
-    // Try to create new session (handles race condition via INSERT OR IGNORE)
     const createResult = createSession(deps.db, {
       claudeSessionId,
       project,
@@ -279,22 +291,9 @@ export const handleQueuePrompt = async (
 
     sessionId = createResult.value.id;
 
-    // Use isNew to determine if this is truly a new session or we lost a race
     if (createResult.value.isNew) {
       promptNumber = 1;
-
-      // Initialize in SessionManager if available
-      if (deps.sessionManager) {
-        deps.sessionManager.initializeSession(
-          sessionId,
-          claudeSessionId,
-          project,
-          prompt,
-        );
-      }
     } else {
-      // Lost the race - session was created by another request
-      // Treat as continuation
       const counterResult = incrementPromptCounter(deps.db, sessionId);
       if (!counterResult.ok) {
         return {
@@ -303,16 +302,10 @@ export const handleQueuePrompt = async (
         };
       }
       promptNumber = counterResult.value;
-
-      // Queue continuation in SessionManager if available
-      if (deps.sessionManager) {
-        deps.sessionManager.queueContinuation(sessionId, prompt, promptNumber);
-      }
     }
   } else {
     sessionId = sessionResult.value.id;
 
-    // Increment counter for continuation prompt
     const counterResult = incrementPromptCounter(deps.db, sessionId);
     if (!counterResult.ok) {
       return {
@@ -321,11 +314,6 @@ export const handleQueuePrompt = async (
       };
     }
     promptNumber = counterResult.value;
-
-    // Queue continuation in SessionManager if available
-    if (deps.sessionManager) {
-      deps.sessionManager.queueContinuation(sessionId, prompt, promptNumber);
-    }
   }
 
   // Store the prompt
@@ -360,8 +348,6 @@ export const handleQueueSummary = async (
   input: QueueSummaryInput,
 ): Promise<HandlerResponse> => {
   const { claudeSessionId, lastUserMessage, lastAssistantMessage } = input;
-  // transcriptPath is forwarded from the hook but not yet wired to the SDK agent.
-  // Future: parse transcript to extract actual user/assistant messages.
 
   // Validate session exists
   const sessionResult = getSessionByClaudeId(deps.db, claudeSessionId);
@@ -379,16 +365,15 @@ export const handleQueueSummary = async (
     };
   }
 
-  // Queue summarize in SessionManager if available
-  if (deps.sessionManager) {
-    deps.sessionManager.queueSummarize(
-      sessionResult.value.id,
-      lastUserMessage,
-      lastAssistantMessage,
-    );
+  // Enqueue for background processing
+  if (deps.router) {
+    deps.router.enqueue({
+      type: "summarize",
+      claudeSessionId,
+      data: { lastUserMessage, lastAssistantMessage },
+    });
   }
 
-  // Queue summary request
   return {
     status: 200,
     body: {
@@ -423,23 +408,13 @@ export const handleCompleteSession = async (
     };
   }
 
-  // Close session in SessionManager if available
-  if (deps.sessionManager) {
-    deps.sessionManager.closeSession(sessionResult.value.id);
-  }
-
-  // Update status
-  const updateResult = updateSessionStatus(
-    deps.db,
-    sessionResult.value.id,
-    "completed",
-  );
-
-  if (!updateResult.ok) {
-    return {
-      status: 500,
-      body: { error: updateResult.error.message },
-    };
+  // Enqueue completion for background processing
+  if (deps.router) {
+    deps.router.enqueue({
+      type: "complete",
+      claudeSessionId,
+      data: { reason },
+    });
   }
 
   return {
@@ -487,9 +462,13 @@ export const handleGetContext = async (
 
   // Build scoring context
   const ftsRanks = new Map<number, number>();
+  const embeddingScores = new Map<number, number>();
   for (const c of candidates) {
     if (c.ftsRank !== 0) {
       ftsRanks.set(c.id, Math.abs(c.ftsRank));
+    }
+    if (c.hasEmbedding) {
+      embeddingScores.set(c.id, 1.0);
     }
   }
 
@@ -503,11 +482,10 @@ export const handleGetContext = async (
     currentProject: project,
     cwdFiles: [],
     ftsRanks,
+    embeddingScores,
     config: {
+      ...DEFAULT_SCORING_CONFIG,
       recencyHalfLifeDays: Number.isNaN(halfLifeDays) ? 2 : halfLifeDays,
-      sameProjectBonus: 0.1,
-      ftsWeight: 1.0,
-      conceptWeight: 0.5,
     },
   };
 
@@ -522,6 +500,12 @@ export const handleGetContext = async (
     .slice(0, limit);
 
   const observations = scored.map((s) => s.observation);
+
+  // Enqueue embed messages for returned observations that lack embeddings
+  if (deps.router) {
+    const embeddedIds = new Set(embeddingScores.keys());
+    enqueueMissingEmbeddings(deps.router, observations, embeddedIds);
+  }
 
   // Compute type counts from scored/filtered observations
   const typeCounts: Record<string, number> = {};
@@ -647,11 +631,13 @@ export const handleSearch = async (
   const escapedQuery = escapeFts5Query(query);
 
   if (type === "observations") {
+    // Fetch extra results for re-ranking headroom
+    const fetchLimit = deps.modelManager ? limit * 2 : limit;
     const result = searchObservations(deps.db, {
       query: escapedQuery,
       concept,
       project,
-      limit,
+      limit: fetchLimit,
     });
     if (!result.ok) {
       return {
@@ -660,11 +646,52 @@ export const handleSearch = async (
       };
     }
 
+    let observations = result.value;
+
+    // Re-rank with embedding similarity when ModelManager is available
+    if (deps.modelManager && observations.length > 0) {
+      const queryEmbedding = await deps.modelManager.computeEmbedding(query);
+      const ids = observations.map((o) => o.id);
+      const embeddingsResult = getEmbeddingsByIds(deps.db, { ids });
+
+      if (embeddingsResult.ok) {
+        const embeddings = embeddingsResult.value;
+
+        // Score each observation: 60% FTS position + 40% cosine similarity
+        const scored = observations.map((obs, index) => {
+          const ftsScore = 1 - index / observations.length;
+          const stored = embeddings.get(obs.id);
+          const embScore = stored
+            ? cosineSimilarity(queryEmbedding, stored)
+            : 0;
+          return {
+            observation: obs,
+            combined: 0.6 * ftsScore + 0.4 * embScore,
+          };
+        });
+
+        scored.sort((a, b) => b.combined - a.combined);
+        observations = scored.slice(0, limit).map((s) => s.observation);
+
+        // Enqueue embed messages for results without embeddings
+        if (deps.router) {
+          enqueueMissingEmbeddings(
+            deps.router,
+            result.value,
+            new Set(embeddings.keys()),
+          );
+        }
+      }
+    }
+
+    // Always enforce limit (covers fallback paths)
+    observations = observations.slice(0, limit);
+
     return {
       status: 200,
       body: {
-        results: result.value,
-        count: result.value.length,
+        results: observations,
+        count: observations.length,
       },
     };
   }

@@ -5,7 +5,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh",
+            "timeout": 600,
+            "statusMessage": "Setting up claude-mem (first run may download ~700MB)..."
           },
           {
             "type": "command",

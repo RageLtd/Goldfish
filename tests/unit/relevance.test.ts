@@ -4,6 +4,7 @@ import {
   calculateRecencyScore,
   calculateSimilarityScore,
   calculateTypeScore,
+  cosineSimilarity,
   type ScoringContext,
   scoreObservation,
 } from "../../src/utils/relevance";
@@ -118,6 +119,43 @@ describe("calculateFileOverlapScore", () => {
   });
 });
 
+describe("cosineSimilarity", () => {
+  it("returns 1.0 for identical normalized vectors", () => {
+    const v = new Float32Array([0.6, 0.8]);
+    expect(cosineSimilarity(v, v)).toBeCloseTo(1.0, 5);
+  });
+
+  it("returns 0 for orthogonal vectors", () => {
+    const a = new Float32Array([1, 0]);
+    const b = new Float32Array([0, 1]);
+    expect(cosineSimilarity(a, b)).toBeCloseTo(0, 5);
+  });
+
+  it("returns -1 for opposite vectors", () => {
+    const a = new Float32Array([1, 0]);
+    const b = new Float32Array([-1, 0]);
+    expect(cosineSimilarity(a, b)).toBeCloseTo(-1, 5);
+  });
+
+  it("returns 0 for empty arrays", () => {
+    expect(cosineSimilarity(new Float32Array([]), new Float32Array([]))).toBe(
+      0,
+    );
+  });
+
+  it("returns 0 for mismatched lengths", () => {
+    const a = new Float32Array([1, 2]);
+    const b = new Float32Array([1, 2, 3]);
+    expect(cosineSimilarity(a, b)).toBe(0);
+  });
+
+  it("handles non-normalized vectors", () => {
+    const a = new Float32Array([3, 4]);
+    const b = new Float32Array([6, 8]);
+    expect(cosineSimilarity(a, b)).toBeCloseTo(1.0, 5);
+  });
+});
+
 describe("scoreObservation", () => {
   const makeContext = (
     overrides?: Partial<ScoringContext>,
@@ -184,5 +222,56 @@ describe("scoreObservation", () => {
       ctx,
     );
     expect(recent).toBeGreaterThan(old);
+  });
+
+  it("gives embedding bonus proportional to similarity score", () => {
+    const embeddingScores = new Map<number, number>([[1, 0.9]]);
+    const ctx = makeContext({ embeddingScores });
+    const withEmbedding = scoreObservation(makeObs({ id: 1 }), ctx);
+    const withoutEmbedding = scoreObservation(makeObs({ id: 2 }), ctx);
+    expect(withEmbedding).toBeGreaterThan(withoutEmbedding);
+  });
+
+  it("applies configurable embedding bonus with similarity score", () => {
+    const embeddingScores = new Map<number, number>([[1, 1.0]]);
+    const ctx = makeContext({
+      embeddingScores,
+      config: {
+        recencyHalfLifeDays: 2,
+        sameProjectBonus: 0.1,
+        ftsWeight: 1.0,
+        conceptWeight: 0.5,
+        embeddingBonus: 0.5,
+      },
+    });
+    const withEmbedding = scoreObservation(makeObs({ id: 1 }), ctx);
+    const withoutEmbedding = scoreObservation(makeObs({ id: 2 }), ctx);
+    // 1.0 * 0.5 = 0.5 bonus
+    expect(withEmbedding - withoutEmbedding).toBeCloseTo(0.5, 2);
+  });
+
+  it("gives partial embedding bonus for partial similarity", () => {
+    const embeddingScores = new Map<number, number>([[1, 0.5]]);
+    const ctx = makeContext({
+      embeddingScores,
+      config: {
+        recencyHalfLifeDays: 2,
+        sameProjectBonus: 0.1,
+        ftsWeight: 1.0,
+        conceptWeight: 0.5,
+        embeddingBonus: 0.4,
+      },
+    });
+    const withEmbedding = scoreObservation(makeObs({ id: 1 }), ctx);
+    const withoutEmbedding = scoreObservation(makeObs({ id: 2 }), ctx);
+    // 0.5 * 0.4 = 0.2 bonus
+    expect(withEmbedding - withoutEmbedding).toBeCloseTo(0.2, 2);
+  });
+
+  it("gives no embedding bonus when embeddingScores is not provided", () => {
+    const ctx = makeContext();
+    const score1 = scoreObservation(makeObs({ id: 1 }), ctx);
+    const score2 = scoreObservation(makeObs({ id: 2 }), ctx);
+    expect(score1).toBeCloseTo(score2, 5);
   });
 });

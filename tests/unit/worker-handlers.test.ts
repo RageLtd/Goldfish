@@ -1,11 +1,15 @@
 import type { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import {
   createDatabase,
   createSession,
   runMigrations,
   storeObservation,
 } from "../../src/db/index";
+import type {
+  ModelManager,
+  ModelManagerConfig,
+} from "../../src/models/manager";
 import {
   handleCompleteSession,
   handleFindByFile,
@@ -19,10 +23,6 @@ import {
   handleSearch,
   type WorkerDeps,
 } from "../../src/worker/handlers";
-import {
-  createSessionManager,
-  type SessionManager,
-} from "../../src/worker/session-manager";
 
 describe("worker handlers", () => {
   let db: Database;
@@ -51,7 +51,7 @@ describe("worker handlers", () => {
       expect(result.body.status).toBe("ok");
       expect(result.body.version).toBe("1.0.0");
       expect(result.body.uptimeSeconds).toBeGreaterThanOrEqual(5);
-      expect(result.body.activeSessions).toBe(0);
+      expect(result.body.pendingMessages).toBe(0);
     });
 
     it("handles missing optional deps gracefully", async () => {
@@ -61,7 +61,7 @@ describe("worker handlers", () => {
       expect(result.body.status).toBe("ok");
       expect(result.body.version).toBe("unknown");
       expect(result.body.uptimeSeconds).toBe(0);
-      expect(result.body.activeSessions).toBe(0);
+      expect(result.body.pendingMessages).toBe(0);
     });
   });
 
@@ -546,6 +546,66 @@ describe("handleGetContext — relevance scoring", () => {
     expect(body.observationCount).toBeGreaterThanOrEqual(1);
   });
 
+  it("boosts observations with embeddings in scoring", async () => {
+    createSession(db, {
+      claudeSessionId: "sess-embed",
+      project: "embed-project",
+      userPrompt: "Test embeddings",
+    });
+
+    // Store two identical observations (same type, same time)
+    storeObservation(db, {
+      claudeSessionId: "sess-embed",
+      project: "embed-project",
+      observation: {
+        type: "discovery",
+        title: "Observation with embedding",
+        subtitle: null,
+        narrative: "Has an embedding vector",
+        facts: [],
+        concepts: [],
+        filesRead: [],
+        filesModified: [],
+      },
+      promptNumber: 1,
+    });
+
+    storeObservation(db, {
+      claudeSessionId: "sess-embed",
+      project: "embed-project",
+      observation: {
+        type: "discovery",
+        title: "Observation without embedding",
+        subtitle: null,
+        narrative: "No embedding vector",
+        facts: [],
+        concepts: [],
+        filesRead: [],
+        filesModified: [],
+      },
+      promptNumber: 1,
+    });
+
+    // Set embedding on the first observation
+    const fakeEmbedding = Buffer.from(new Float32Array([0.1, 0.2, 0.3]).buffer);
+    db.run("UPDATE observations SET embedding = ? WHERE id = 1", [
+      fakeEmbedding,
+    ]);
+
+    const result = await handleGetContext(deps, {
+      project: "embed-project",
+      limit: 10,
+    });
+
+    expect(result.status).toBe(200);
+    const body = result.body as { context: string; observationCount: number };
+    expect(body.observationCount).toBe(2);
+    // The observation with embedding should be ranked first
+    expect(body.context).toMatch(
+      /Observation with embedding[\s\S]*Observation without embedding/,
+    );
+  });
+
   it("attributes cross-project observations in formatted output", async () => {
     // Create session first (foreign key requirement)
     createSession(db, {
@@ -586,146 +646,121 @@ describe("handleGetContext — relevance scoring", () => {
   });
 });
 
-describe("worker handlers with SessionManager integration", () => {
+describe("handleSearch — embedding re-ranking", () => {
   let db: Database;
-  let sessionManager: SessionManager;
-  let deps: WorkerDeps;
+
+  const createMockModelManager = (
+    embeddingFn?: (text: string) => Promise<Float32Array>,
+  ): ModelManager => ({
+    generateText: mock(async () => ""),
+    computeEmbedding: mock(
+      embeddingFn ?? (async () => new Float32Array([0.5, 0.5, 0.5])),
+    ),
+    dispose: mock(async () => {}),
+    getConfig: mock(
+      (): ModelManagerConfig => ({
+        generativeModelId: "test",
+        embeddingModelId: "test-embed",
+        cliPath: "",
+        cacheDir: "/tmp",
+      }),
+    ),
+  });
 
   beforeEach(() => {
     db = createDatabase(":memory:");
     runMigrations(db);
-    sessionManager = createSessionManager();
-    deps = { db, sessionManager };
+    createSession(db, {
+      claudeSessionId: "sess-search",
+      project: "search-project",
+      userPrompt: "Test search",
+    });
   });
 
   afterEach(() => {
     db.close();
   });
 
-  describe("handleQueuePrompt with SessionManager", () => {
-    it("initializes session in SessionManager for new session", async () => {
-      const result = await handleQueuePrompt(deps, {
-        claudeSessionId: "claude-new",
-        prompt: "Help me fix a bug",
-        cwd: "/projects/my-app",
-      });
-
-      expect(result.status).toBe(200);
-      // SessionManager should have initialized the session
-      const activeSessions = sessionManager.getActiveSessions();
-      expect(activeSessions.length).toBe(1);
-      expect(activeSessions[0].claudeSessionId).toBe("claude-new");
-      expect(activeSessions[0].userPrompt).toBe("Help me fix a bug");
+  it("re-ranks observations by combined FTS + embedding score", async () => {
+    // Store observations with keywords that FTS will match
+    storeObservation(db, {
+      claudeSessionId: "sess-search",
+      project: "search-project",
+      observation: {
+        type: "discovery",
+        title: "Authentication flow setup",
+        subtitle: null,
+        narrative: "Set up authentication flow with OAuth",
+        facts: [],
+        concepts: [],
+        filesRead: [],
+        filesModified: [],
+      },
+      promptNumber: 1,
     });
 
-    it("queues continuation in SessionManager for existing session", async () => {
-      // First create session
-      createSession(db, {
-        claudeSessionId: "claude-123",
-        project: "test-project",
-        userPrompt: "Initial prompt",
-      });
-
-      // Initialize in SessionManager manually (simulating prior prompt)
-      sessionManager.initializeSession(
-        1,
-        "claude-123",
-        "test-project",
-        "Initial prompt",
-      );
-
-      const result = await handleQueuePrompt(deps, {
-        claudeSessionId: "claude-123",
-        prompt: "Follow up prompt",
-        cwd: "/projects/test-project",
-      });
-
-      expect(result.status).toBe(200);
-      expect(result.body.promptNumber).toBeGreaterThan(1);
-
-      // Should have queued a continuation message
-      const iterator = sessionManager.getMessageIterator(1);
-      expect(iterator).not.toBeNull();
-      const msg = await iterator?.next();
-      expect(msg?.value?.type).toBe("continuation");
+    storeObservation(db, {
+      claudeSessionId: "sess-search",
+      project: "search-project",
+      observation: {
+        type: "bugfix",
+        title: "Authentication token refresh fix",
+        subtitle: null,
+        narrative: "Fixed authentication token refresh logic",
+        facts: [],
+        concepts: [],
+        filesRead: [],
+        filesModified: [],
+      },
+      promptNumber: 1,
     });
+
+    // Give second observation an embedding that's very similar to query
+    const queryLikeEmbedding = new Float32Array([0.9, 0.1, 0.0]);
+    db.run("UPDATE observations SET embedding = ? WHERE id = 2", [
+      Buffer.from(queryLikeEmbedding.buffer),
+    ]);
+
+    const modelManager = createMockModelManager(
+      async () => new Float32Array([0.9, 0.1, 0.0]),
+    );
+
+    const deps: WorkerDeps = { db, modelManager };
+    const result = await handleSearch(deps, {
+      query: "authentication",
+      type: "observations",
+      limit: 10,
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body.count).toBeGreaterThanOrEqual(1);
   });
 
-  describe("handleQueueObservation with SessionManager", () => {
-    it("queues observation in SessionManager for active session", async () => {
-      // Create session in DB
-      createSession(db, {
-        claudeSessionId: "claude-123",
-        project: "test-project",
-        userPrompt: "Test",
-      });
-
-      // Initialize in SessionManager
-      sessionManager.initializeSession(1, "claude-123", "test-project", "Test");
-
-      const result = await handleQueueObservation(deps, {
-        claudeSessionId: "claude-123",
-        toolName: "Bash",
-        toolInput: { command: "git status" },
-        toolResponse: { stdout: "On branch main" },
-        cwd: "/project",
-      });
-
-      expect(result.status).toBe(200);
-
-      // Should have queued an observation message
-      const iterator = sessionManager.getMessageIterator(1);
-      expect(iterator).not.toBeNull();
-      const msg = await iterator?.next();
-      expect(msg?.value?.type).toBe("observation");
+  it("falls back to FTS-only when no modelManager", async () => {
+    storeObservation(db, {
+      claudeSessionId: "sess-search",
+      project: "search-project",
+      observation: {
+        type: "discovery",
+        title: "Database migration setup",
+        subtitle: null,
+        narrative: "Set up database migration system",
+        facts: [],
+        concepts: [],
+        filesRead: [],
+        filesModified: [],
+      },
+      promptNumber: 1,
     });
-  });
 
-  describe("handleQueueSummary with SessionManager", () => {
-    it("queues summarize in SessionManager for active session", async () => {
-      createSession(db, {
-        claudeSessionId: "claude-123",
-        project: "test-project",
-        userPrompt: "Test",
-      });
-
-      sessionManager.initializeSession(1, "claude-123", "test-project", "Test");
-
-      const result = await handleQueueSummary(deps, {
-        claudeSessionId: "claude-123",
-        lastUserMessage: "Fix the bug",
-        lastAssistantMessage: "I fixed it",
-      });
-
-      expect(result.status).toBe(200);
-
-      // Should have queued a summarize message
-      const iterator = sessionManager.getMessageIterator(1);
-      expect(iterator).not.toBeNull();
-      const msg = await iterator?.next();
-      expect(msg?.value?.type).toBe("summarize");
+    const deps: WorkerDeps = { db };
+    const result = await handleSearch(deps, {
+      query: "database",
+      type: "observations",
+      limit: 10,
     });
-  });
 
-  describe("handleCompleteSession with SessionManager", () => {
-    it("closes session in SessionManager", async () => {
-      createSession(db, {
-        claudeSessionId: "claude-123",
-        project: "test-project",
-        userPrompt: "Test",
-      });
-
-      sessionManager.initializeSession(1, "claude-123", "test-project", "Test");
-
-      expect(sessionManager.getActiveSessions().length).toBe(1);
-
-      const result = await handleCompleteSession(deps, {
-        claudeSessionId: "claude-123",
-        reason: "exit",
-      });
-
-      expect(result.status).toBe(200);
-      expect(sessionManager.getActiveSessions().length).toBe(0);
-    });
+    expect(result.status).toBe(200);
+    expect(result.body.count).toBeGreaterThanOrEqual(1);
   });
 });

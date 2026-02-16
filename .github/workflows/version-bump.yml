@@ -79,10 +79,57 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "No conventional commits found that require a version bump." >> $GITHUB_STEP_SUMMARY
 
+  build-llama:
+    name: Build llama.cpp binaries
+    needs: version-bump
+    if: needs.version-bump.outputs.should_release == 'true'
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: darwin-arm64
+            metal_flag: "-DGGML_METAL=ON"
+          - os: ubuntu-latest
+            target: linux-x64
+            metal_flag: "-DGGML_METAL=OFF"
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Clone llama.cpp
+        run: git clone --depth 1 https://github.com/ggml-org/llama.cpp.git
+
+      - name: Build llama.cpp
+        run: |
+          cd llama.cpp
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            ${{ matrix.metal_flag }} \
+            -DLLAMA_BUILD_EXAMPLES=ON
+          cmake --build build --target llama-completion llama-embedding -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
+
+      - name: Package
+        run: |
+          mkdir -p staging
+          cp llama.cpp/build/bin/llama-completion staging/
+          cp llama.cpp/build/bin/llama-embedding staging/
+          # Copy shared libraries — location varies by platform:
+          # Linux: build/bin/*.so, macOS: build/src/*.dylib + build/ggml/src/*.dylib
+          cp llama.cpp/build/bin/libllama.* staging/ 2>/dev/null || true
+          cp llama.cpp/build/bin/libggml*.* staging/ 2>/dev/null || true
+          cp llama.cpp/build/src/libllama.* staging/ 2>/dev/null || true
+          cp llama.cpp/build/ggml/src/libggml*.* staging/ 2>/dev/null || true
+          ls -lh staging/
+          tar czf llama-${{ matrix.target }}.tar.gz -C staging .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llama-${{ matrix.target }}
+          path: llama-${{ matrix.target }}.tar.gz
+
   build-release:
     name: Build & Release
     runs-on: ubuntu-latest
-    needs: version-bump
+    needs: [version-bump, build-llama]
     if: needs.version-bump.outputs.should_release == 'true'
 
     steps:
@@ -102,7 +149,7 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Build all platforms
+      - name: Build claude-mem binaries
         run: |
           mkdir -p dist
 
@@ -110,20 +157,21 @@ jobs:
           bun build --compile --minify --target=bun-darwin-arm64 \
             src/cli.ts --outfile dist/claude-mem-darwin-arm64
 
-          # macOS x64 (Intel)
-          bun build --compile --minify --target=bun-darwin-x64 \
-            src/cli.ts --outfile dist/claude-mem-darwin-x64
-
           # Linux x64
           bun build --compile --minify --target=bun-linux-x64 \
             src/cli.ts --outfile dist/claude-mem-linux-x64
 
-          # Linux ARM64
-          bun build --compile --minify --target=bun-linux-arm64 \
-            src/cli.ts --outfile dist/claude-mem-linux-arm64
-
-          # Show built files
           ls -lh dist/
+
+      - name: Download llama.cpp artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          pattern: llama-*
+          merge-multiple: true
+
+      - name: List release assets
+        run: ls -lh dist/
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -132,19 +180,19 @@ jobs:
           name: v${{ needs.version-bump.outputs.new_version }}
           files: |
             dist/claude-mem-darwin-arm64
-            dist/claude-mem-darwin-x64
             dist/claude-mem-linux-x64
-            dist/claude-mem-linux-arm64
+            dist/llama-darwin-arm64.tar.gz
+            dist/llama-linux-x64.tar.gz
           generate_release_notes: true
 
       - name: Release Summary
         run: |
-          echo "## 🎉 Release Published" >> $GITHUB_STEP_SUMMARY
+          echo "## Release Published" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** v${{ needs.version-bump.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Binaries:**" >> $GITHUB_STEP_SUMMARY
+          echo "**Assets:**" >> $GITHUB_STEP_SUMMARY
           echo "- claude-mem-darwin-arm64 (macOS M1/M2/M3)" >> $GITHUB_STEP_SUMMARY
-          echo "- claude-mem-darwin-x64 (macOS Intel)" >> $GITHUB_STEP_SUMMARY
           echo "- claude-mem-linux-x64" >> $GITHUB_STEP_SUMMARY
-          echo "- claude-mem-linux-arm64" >> $GITHUB_STEP_SUMMARY
+          echo "- llama-darwin-arm64.tar.gz (llama.cpp binaries)" >> $GITHUB_STEP_SUMMARY
+          echo "- llama-linux-x64.tar.gz (llama.cpp binaries)" >> $GITHUB_STEP_SUMMARY

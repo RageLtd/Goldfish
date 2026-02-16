@@ -534,6 +534,7 @@ interface GetCandidateObservationsInput {
 
 export interface ObservationWithRank extends Observation {
   readonly ftsRank: number;
+  readonly hasEmbedding: boolean;
 }
 
 /**
@@ -550,37 +551,153 @@ export const getCandidateObservations = (
   return fromTry(() => {
     if (ftsQuery) {
       const sql = `
-				SELECT o.*, fts.rank as fts_rank
-				FROM observations o
-				JOIN observations_fts fts ON o.id = fts.rowid
-				WHERE observations_fts MATCH ?
-				ORDER BY fts.rank
-				LIMIT ?
-			`;
+        SELECT o.id, o.sdk_session_id, o.project, o.type, o.title, o.subtitle,
+               o.narrative, o.facts, o.concepts, o.files_read, o.files_modified,
+               o.prompt_number, o.discovery_tokens, o.created_at, o.created_at_epoch,
+               (o.embedding IS NOT NULL) AS has_embedding,
+               fts.rank as fts_rank
+        FROM observations o
+        JOIN observations_fts fts ON o.id = fts.rowid
+        WHERE observations_fts MATCH ?
+        ORDER BY fts.rank
+        LIMIT ?
+      `;
       const rows = db
-        .query<ObservationRow & { fts_rank: number }, [string, number]>(sql)
+        .query<
+          Omit<ObservationRow, "embedding"> & {
+            has_embedding: number;
+            fts_rank: number;
+          },
+          [string, number]
+        >(sql)
         .all(ftsQuery, limit);
 
       return rows.map((row) => ({
-        ...rowToObservation(row),
+        ...rowToObservation({ ...row, embedding: null }),
         ftsRank: row.fts_rank,
+        hasEmbedding: row.has_embedding === 1,
       }));
     }
 
     // No FTS query — return recent from all projects
     const sql = `
-			SELECT *, 0 as fts_rank FROM observations
-			ORDER BY created_at_epoch DESC
-			LIMIT ?
-		`;
+      SELECT id, sdk_session_id, project, type, title, subtitle,
+             narrative, facts, concepts, files_read, files_modified,
+             prompt_number, discovery_tokens, created_at, created_at_epoch,
+             (embedding IS NOT NULL) AS has_embedding,
+             0 as fts_rank
+      FROM observations
+      ORDER BY created_at_epoch DESC
+      LIMIT ?
+    `;
     const rows = db
-      .query<ObservationRow & { fts_rank: number }, [number]>(sql)
+      .query<
+        Omit<ObservationRow, "embedding"> & {
+          has_embedding: number;
+          fts_rank: number;
+        },
+        [number]
+      >(sql)
       .all(limit);
 
     return rows.map((row) => ({
-      ...rowToObservation(row),
+      ...rowToObservation({ ...row, embedding: null }),
       ftsRank: 0,
+      hasEmbedding: row.has_embedding === 1,
     }));
+  });
+};
+
+// ============================================================================
+// Embedding Operations
+// ============================================================================
+
+interface GetEmbeddingsByIdsInput {
+  readonly ids: readonly number[];
+}
+
+/**
+ * Fetches embedding BLOBs for specific observation IDs.
+ * Returns a map of observation ID to Float32Array embedding.
+ */
+export const getEmbeddingsByIds = (
+  db: Database,
+  input: GetEmbeddingsByIdsInput,
+): Result<Map<number, Float32Array>> => {
+  const { ids } = input;
+  if (ids.length === 0) return ok(new Map());
+
+  return fromTry(() => {
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = db
+      .query<{ id: number; embedding: Buffer }, number[]>(
+        `SELECT id, embedding FROM observations WHERE id IN (${placeholders}) AND embedding IS NOT NULL`,
+      )
+      .all(...ids);
+
+    const result = new Map<number, Float32Array>();
+    for (const row of rows) {
+      result.set(
+        row.id,
+        new Float32Array(
+          row.embedding.buffer,
+          row.embedding.byteOffset,
+          row.embedding.byteLength / 4,
+        ),
+      );
+    }
+    return result;
+  });
+};
+
+interface GetObservationsWithoutEmbeddingsInput {
+  readonly limit: number;
+}
+
+/**
+ * Returns observations lacking embeddings, for backfill processing.
+ */
+export const getObservationsWithoutEmbeddings = (
+  db: Database,
+  input: GetObservationsWithoutEmbeddingsInput,
+): Result<
+  readonly {
+    readonly id: number;
+    readonly title: string;
+    readonly narrative: string;
+  }[]
+> => {
+  return fromTry(() => {
+    const rows = db
+      .query<
+        { id: number; title: string | null; narrative: string | null },
+        [number]
+      >(
+        `SELECT id, title, narrative FROM observations WHERE embedding IS NULL ORDER BY id LIMIT ?`,
+      )
+      .all(input.limit);
+
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title ?? "",
+      narrative: row.narrative ?? "",
+    }));
+  });
+};
+
+/**
+ * Stores a pre-computed embedding BLOB for an observation.
+ */
+export const updateObservationEmbedding = (
+  db: Database,
+  id: number,
+  embedding: Float32Array,
+): Result<void> => {
+  return fromTry(() => {
+    db.run("UPDATE observations SET embedding = ? WHERE id = ?", [
+      Buffer.from(embedding.buffer),
+      id,
+    ]);
   });
 };
 
@@ -626,9 +743,9 @@ export const findSimilarObservation = (
     const rows = db
       .query<ObservationRow, [string, number]>(
         `SELECT * FROM observations
-				 WHERE project = ? AND created_at_epoch > ?
-				 ORDER BY created_at_epoch DESC
-				 LIMIT 20`,
+         WHERE project = ? AND created_at_epoch > ?
+         ORDER BY created_at_epoch DESC
+         LIMIT 20`,
       )
       .all(project, cutoff);
 
@@ -676,6 +793,7 @@ interface ObservationRow {
   discovery_tokens: number;
   created_at: string;
   created_at_epoch: number;
+  embedding: Buffer | null;
 }
 
 interface SummaryRow {

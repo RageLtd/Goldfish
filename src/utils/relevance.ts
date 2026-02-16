@@ -14,6 +14,7 @@ export interface ScoringConfig {
   readonly sameProjectBonus: number;
   readonly ftsWeight: number;
   readonly conceptWeight: number;
+  readonly embeddingBonus: number;
 }
 
 export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
@@ -21,12 +22,14 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
   sameProjectBonus: 0.1,
   ftsWeight: 1.0,
   conceptWeight: 0.5,
+  embeddingBonus: 0.15,
 };
 
 export interface ScoringContext {
   readonly currentProject: string;
   readonly cwdFiles: readonly string[];
   readonly ftsRanks: Map<number, number>;
+  readonly embeddingScores?: Map<number, number>;
   readonly config?: ScoringConfig;
 }
 
@@ -79,6 +82,26 @@ export const calculateSimilarityScore = (
 };
 
 /**
+ * Computes cosine similarity between two Float32Array vectors.
+ * Returns a value between -1 and 1 (typically 0-1 for normalized embeddings).
+ */
+export const cosineSimilarity = (a: Float32Array, b: Float32Array): number => {
+  if (a.length !== b.length || a.length === 0) return 0;
+
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
+};
+
+/**
  * Calculates proportion of observation files found in cwd file set.
  */
 export const calculateFileOverlapScore = (
@@ -108,6 +131,7 @@ export const calculateFileOverlapScore = (
  *         + similarityScore(0-1.5)
  *         + fileOverlapScore(0-1.0)
  *         + currentProjectBonus(0.1)
+ *         + embeddingScore * embeddingBonus(0-0.15)
  */
 export const scoreObservation = (
   observation: Observation,
@@ -139,5 +163,16 @@ export const scoreObservation = (
       ? config.sameProjectBonus
       : 0;
 
-  return recency + typeImportance + similarity + fileOverlap + projectBonus;
+  // Embedding similarity score (0-1) multiplied by config weight
+  const embeddingScore = context.embeddingScores?.get(observation.id) ?? 0;
+  const embeddingBonus = embeddingScore * config.embeddingBonus;
+
+  return (
+    recency +
+    typeImportance +
+    similarity +
+    fileOverlap +
+    projectBonus +
+    embeddingBonus
+  );
 };
