@@ -211,3 +211,6 @@ phase3_models() {
 phase1_claude_mem
 phase2_llama_binaries
 phase3_models
+
+# Output valid hook JSON (Claude Code requires JSON on stdout from hook commands)
+echo '{"continue":true,"suppressOutput":true}'
