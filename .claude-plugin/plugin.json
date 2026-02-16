@@ -1,8 +1,0 @@
-{
-  "name": "claude-mem-bun",
-  "description": "Persistent memory for Claude Code - automatically captures observations, decisions, and session context",
-  "version": "2.0.2",
-  "author": {
-    "name": "RageLtd"
-  }
-}

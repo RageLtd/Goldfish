@@ -176,7 +176,6 @@ const updatePackageJson = (newVersion: string): void => {
 
 // Plugin JSON files that contain a "version" field to keep in sync
 const PLUGIN_VERSION_FILES = [
-  ".claude-plugin/plugin.json",
   "plugin/.claude-plugin/plugin.json",
 ];
 
@@ -193,12 +192,15 @@ const updatePluginVersionFiles = (newVersion: string): void => {
     writeFileSync(filePath, `${JSON.stringify(json, null, "  ")}\n`);
   }
 
-  // marketplace.json has version nested inside plugins[]
+  // marketplace.json has version and source.ref nested inside plugins[]
   const marketplacePath = join(cwd, MARKETPLACE_FILE);
   const marketplaceContent = readFileSync(marketplacePath, "utf-8");
   const marketplace = JSON.parse(marketplaceContent);
   for (const plugin of marketplace.plugins) {
     plugin.version = newVersion;
+    if (plugin.source?.source === "github") {
+      plugin.source.ref = `v${newVersion}`;
+    }
   }
   writeFileSync(
     marketplacePath,
