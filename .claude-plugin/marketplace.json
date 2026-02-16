@@ -11,7 +11,11 @@
     {
       "name": "claude-mem-bun",
       "version": "2.0.2",
-      "source": "./plugin",
+      "source": {
+        "source": "github",
+        "repo": "rageltd/claude-mem",
+        "ref": "v2.0.2"
+      },
       "description": "Persistent memory system for Claude Code - context compression across sessions"
     }
   ]

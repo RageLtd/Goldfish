@@ -2,20 +2,35 @@
   "hooks": {
     "SessionStart": [
       {
-        "type": "command",
-        "command": "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh",
-        "timeout": 600,
-        "statusMessage": "Setting up claude-mem (first run may download ~700MB)..."
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh",
+            "timeout": 600,
+            "statusMessage": "Setting up claude-mem (first run may download ~700MB)..."
+          }
+        ]
       },
       {
-        "type": "command",
-        "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:context"
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:context"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
       {
-        "type": "command",
-        "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:new"
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:new"
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -31,14 +46,24 @@
     ],
     "Stop": [
       {
-        "type": "command",
-        "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:summary"
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:summary"
+          }
+        ]
       }
     ],
     "SessionEnd": [
       {
-        "type": "command",
-        "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:cleanup"
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:cleanup"
+          }
+        ]
       }
     ]
   }
