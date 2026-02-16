@@ -36,3 +36,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_on
 # Built binaries (downloaded at runtime)
 plugin/bin/claude-mem
 plugin/bin/claude-mem-*
+docs/plans
+
+# GGUF model files (large, downloaded at runtime)
+/models/

@@ -13,6 +13,7 @@
  *   hook:summary    - Stop hook (generate summary)
  *   hook:cleanup    - SessionEnd hook (cleanup)
  *   worker          - Start HTTP worker service
+ *   backfill        - Compute embeddings for observations without them
  *   version         - Show version
  */
 
@@ -43,6 +44,10 @@ const COMMANDS: Record<string, () => Promise<void>> = {
     const { main } = await import("./worker/main");
     await main();
   },
+  backfill: async () => {
+    const { main } = await import("./commands/backfill");
+    await main();
+  },
   version: async () => {
     console.log(`claude-mem-bun v${pkg.version}`);
   },
@@ -60,6 +65,7 @@ Commands:
   hook:summary    Stop hook - generate session summary
   hook:cleanup    SessionEnd hook - cleanup session
   worker          Start HTTP worker service
+  backfill        Compute embeddings for observations without them
   version         Show version
 
 Examples:

@@ -37,9 +37,9 @@ Claude Code hooks → HTTP POST → Worker Service → SessionManager queue
 
 - **Hooks** (`src/hooks/`): Fire-and-forget HTTP clients running in Claude Code's process. Each hook maps to a lifecycle event (SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd). They must be fast — the worker does the heavy lifting.
 
-- **Worker** (`src/worker/`): Background HTTP server (Bun, port 3456). `service.ts` routes requests to `handlers.ts`. `session-manager.ts` holds in-memory state with async message queues and TTL-based eviction. `background-processor.ts` polls queues and dispatches to `sdk-agent.ts`.
+- **Worker** (`src/worker/`): Background HTTP server (Bun, port 3456). `service.ts` routes requests to `handlers.ts`. `message-router.ts` holds a sequential FIFO queue for processing. Messages are dispatched to `local-agent.ts`.
 
-- **SDK Agent** (`src/worker/sdk-agent.ts`): Spawns Claude subprocess via `@anthropic-ai/claude-agent-sdk`. Sends structured prompts (`src/sdk/prompts.ts`), receives XML blocks, parsed by `src/sdk/parser.ts` into domain types.
+- **Local Agent** (`src/worker/local-agent.ts`): Processes observations and summaries through llama.cpp CLI binaries via `ModelManager`. Sends structured prompts (`src/models/prompts.ts`), receives tool calls in XML format, parsed by `src/models/tool-call-parser.ts` into domain types.
 
 - **Database** (`src/db/`): Pure functions taking `db: Database` as first arg. `migrations.ts` handles versioned schema. Tables: `sdk_sessions`, `observations` (with FTS5), `session_summaries` (with FTS5), `user_prompts` (with FTS5). WAL mode enabled.
 
@@ -85,13 +85,46 @@ All in `src/types/domain.ts`. Observation types: `decision | bugfix | feature | 
 |----------|---------|---------|
 | `CLAUDE_MEM_PORT` | `3456` | Worker HTTP port |
 | `CLAUDE_MEM_DB` | `~/.claude-mem/memory.db` | SQLite path |
-| `CLAUDE_MEM_MODEL` | `claude-haiku-4-5` | SDK agent model |
 | `CLAUDE_MEM_LOG_LEVEL` | `INFO` | Logging verbosity |
 | `CLAUDE_MEM_CONTEXT_OBSERVATIONS` | `50` | Max observations in context |
 | `CLAUDE_MEM_RECENCY_HALFLIFE_DAYS` | `2` | Recency decay half-life |
 | `CLAUDE_MEM_CROSS_PROJECT` | `true` | Enable cross-project retrieval |
 | `CLAUDE_MEM_SKIP_TOOLS` | `TodoRead,TodoWrite,LS` | Tools filtered from pipeline |
 | `CLAUDE_MEM_BATCH_WINDOW_MS` | `3000` | Observation batching window |
+| `CLAUDE_MEM_LLAMA_GENERATION_MODEL` | `~/.claude-mem/models/Qwen3-0.6B-Q8_0.gguf` | Path to GGUF generative model |
+| `CLAUDE_MEM_LLAMA_EMBEDDING_MODEL` | `~/.claude-mem/models/all-MiniLM-L6-v2-Q8_0.gguf` | Path to GGUF embedding model |
+| `CLAUDE_MEM_LLAMA_CLI_PATH` | `~/.claude-mem/bin` | Directory containing llama.cpp binaries |
+| `CLAUDE_MEM_MODEL_DIR` | `~/.claude-mem/models` | Model cache directory |
+
+## Installation & Runtime Dependencies
+
+The `ensure-binary.sh` SessionStart hook downloads all runtime dependencies on first use:
+
+1. **claude-mem binary** → `$PLUGIN_ROOT/bin/claude-mem` (from GitHub Releases)
+2. **llama.cpp binaries** → `~/.claude-mem/bin/` (from GitHub Releases, built in CI)
+3. **GGUF models** → `~/.claude-mem/models/` (from HuggingFace, ~685MB total)
+
+Version checking uses GitHub release tags (phases 1-2) and HuggingFace ETags (phase 3) to avoid re-downloading on subsequent runs.
+
+### File Layout
+
+```
+~/.claude-mem/
+├── bin/                          # llama.cpp binaries + shared libs
+│   ├── llama-completion
+│   ├── llama-embedding
+│   └── libllama.* / libggml*.*   # shared libraries
+├── models/
+│   ├── all-MiniLM-L6-v2-Q8_0.gguf   # 46MB embedding model
+│   └── Qwen3-0.6B-Q8_0.gguf         # 639MB generation model
+├── memory.db
+└── .version                      # installed release tag
+```
+
+### Supported Platforms
+
+- **darwin-arm64** (macOS Apple Silicon)
+- **linux-x64** (Linux x86_64)
 
 ## Versioning
 

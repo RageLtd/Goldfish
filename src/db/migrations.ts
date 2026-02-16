@@ -245,4 +245,11 @@ export const migrations: readonly Migration[] = [
       );
     },
   },
+  {
+    version: 6,
+    description: "Add embedding column to observations",
+    up: (db) => {
+      db.run("ALTER TABLE observations ADD COLUMN embedding BLOB");
+    },
+  },
 ];

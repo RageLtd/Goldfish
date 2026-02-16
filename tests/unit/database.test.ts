@@ -713,6 +713,61 @@ describe("database", () => {
     });
   });
 
+  describe("embedding column", () => {
+    it("stores and retrieves embedding blob on observations", () => {
+      // Create session first
+      createSession(db, {
+        claudeSessionId: "embed-test",
+        project: "test",
+        userPrompt: "test",
+      });
+
+      // Store observation
+      const obsResult = storeObservation(db, {
+        claudeSessionId: "embed-test",
+        project: "test",
+        observation: {
+          type: "discovery",
+          title: "Test embedding",
+          subtitle: null,
+          narrative: "test",
+          facts: [],
+          concepts: [],
+          filesRead: [],
+          filesModified: [],
+        },
+        promptNumber: 1,
+      });
+      expect(obsResult.ok).toBe(true);
+
+      // Verify we can store an embedding for this observation
+      const embedding = new Float32Array([0.1, 0.2, 0.3]);
+      const buffer = Buffer.from(embedding.buffer);
+      db.run("UPDATE observations SET embedding = ? WHERE id = ?", [
+        buffer,
+        obsResult.ok ? obsResult.value : -1,
+      ]);
+
+      // Retrieve and verify
+      const row = db
+        .query<{ embedding: Buffer | null }, [number]>(
+          "SELECT embedding FROM observations WHERE id = ?",
+        )
+        .get(obsResult.ok ? obsResult.value : -1);
+
+      expect(row).not.toBeNull();
+      expect(row!.embedding).not.toBeNull();
+      const retrieved = new Float32Array(
+        row!.embedding!.buffer,
+        row!.embedding!.byteOffset,
+        row!.embedding!.byteLength / 4,
+      );
+      expect(retrieved[0]).toBeCloseTo(0.1);
+      expect(retrieved[1]).toBeCloseTo(0.2);
+      expect(retrieved[2]).toBeCloseTo(0.3);
+    });
+  });
+
   describe("findSimilarObservation", () => {
     it("returns null when no similar observations exist", () => {
       const result = findSimilarObservation(db, {

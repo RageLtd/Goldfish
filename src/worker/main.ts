@@ -6,12 +6,11 @@
 import { join } from "node:path";
 import pkg from "../../package.json";
 import { createDatabase, runMigrations } from "../db/index";
+import { createModelManager } from "../models/manager";
 import { fromPromise } from "../types/result";
 import { ensureDbDir } from "../utils/fs";
-import { createBackgroundProcessor } from "./background-processor";
-import { createSDKAgent } from "./sdk-agent";
+import { createMessageRouter, createProcessMessage } from "./message-router";
 import { createWorkerRouter } from "./service";
-import { createSessionManager } from "./session-manager";
 
 const PORT = parseInt(process.env.CLAUDE_MEM_PORT || "3456", 10);
 const DB_PATH =
@@ -41,18 +40,22 @@ const start = async (): Promise<void> => {
       runMigrations(db);
       log("Database initialized");
 
-      // Create session manager
-      const sessionManager = createSessionManager();
-      log("SessionManager initialized");
+      // Create model manager
+      const modelManager = createModelManager({});
+      log(
+        `ModelManager initialized (gen=${modelManager.getConfig().generativeModelId}, embed=${modelManager.getConfig().embeddingModelId})`,
+      );
 
-      // Create SDK agent (uses Claude Agent SDK with user's credentials)
-      const sdkAgent = createSDKAgent({ db });
-      log("SDKAgent initialized");
+      // Create message router (replaces SessionManager + BackgroundProcessor)
+      const processMessage = createProcessMessage({ db, modelManager });
+      const messageRouter = createMessageRouter({ processMessage });
+      log("MessageRouter initialized");
 
-      // Create router with all dependencies
-      const router = createWorkerRouter({
+      // Create HTTP router with all dependencies
+      const httpRouter = createWorkerRouter({
         db,
-        sessionManager,
+        router: messageRouter,
+        modelManager,
         startedAt,
         version: VERSION,
       });
@@ -60,51 +63,17 @@ const start = async (): Promise<void> => {
       // Start HTTP server
       const server = Bun.serve({
         port: PORT,
-        fetch: router.handle,
+        fetch: httpRouter.handle,
       });
 
       log(`Worker service running at http://127.0.0.1:${server.port}`);
 
-      // Create background processor for SDK agent
-      const backgroundProcessor = createBackgroundProcessor({
-        sessionManager,
-        sdkAgent,
-        pollIntervalMs: 1000,
-        onObservationStored: (sessionId, _observationId) => {
-          log(`Observation stored for session ${sessionId}`);
-        },
-        onSummaryStored: (sessionId, _summaryId) => {
-          log(`Summary stored for session ${sessionId}`);
-        },
-        onError: (sessionId, error) => {
-          logError(`SDK error for session ${sessionId}: ${error}`);
-        },
-      });
-
-      // Start background processing
-      backgroundProcessor.start();
-      log("BackgroundProcessor started");
-
-      // Start session eviction sweep (prevents memory leaks from abandoned sessions)
-      sessionManager.startEvictionSweep();
-      log("Session eviction sweep started");
-
       // Handle shutdown
       const shutdown = async () => {
         log("Shutting down...");
-
-        // Stop background processor and wait for active processing
-        backgroundProcessor.stop();
-        log(
-          `Waiting for ${backgroundProcessor.getActiveProcessingCount()} active processing tasks...`,
-        );
-        await backgroundProcessor.awaitCompletion(5000);
-
-        // Close all active sessions
-        for (const session of sessionManager.getActiveSessions()) {
-          sessionManager.closeSession(session.sessionDbId);
-        }
-
+        log(`Draining ${messageRouter.pending()} pending messages...`);
+        await messageRouter.shutdown();
+        await modelManager.dispose();
         db.close();
         server.stop();
         process.exit(0);
