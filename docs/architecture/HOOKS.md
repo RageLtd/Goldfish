@@ -12,7 +12,7 @@ Hooks are **thin HTTP clients** that:
 
 ## Hook Configuration
 
-**File:** `plugin/hooks/hooks.json`
+**File:** `hooks/hooks.json`
 
 ```json
 {

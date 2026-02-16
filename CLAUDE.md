@@ -10,7 +10,7 @@ bun test                 # Run all tests
 bun test tests/unit/     # Run unit tests only
 bun test tests/unit/database.test.ts               # Run a single test file
 bun test tests/unit/database.test.ts -t "stores"   # Run tests matching pattern
-bun run build            # Compile standalone binary (output: plugin/bin/claude-mem)
+bun run build            # Compile standalone binary (output: bin/claude-mem)
 bun run worker:start     # Start worker service locally
 bunx biome check --write .  # Format + lint (run before committing)
 ```

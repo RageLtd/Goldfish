@@ -41,11 +41,14 @@ On first session start, the plugin automatically downloads the correct binary fo
 ## Plugin Structure
 
 ```
-plugin/
 ├── .claude-plugin/
+│   ├── marketplace.json      # Marketplace manifest
 │   └── plugin.json           # Plugin manifest
 ├── bin/
 │   └── claude-mem            # Binary (downloaded at runtime)
+├── commands/
+│   └── memory/
+│       └── context.md        # Memory context command
 ├── hooks/
 │   └── hooks.json            # Lifecycle hook configuration
 ├── scripts/
@@ -98,13 +101,13 @@ Then restart Claude Code to pick up the changes.
 ### CLI Commands
 
 ```bash
-./plugin/bin/claude-mem hook:context   # SessionStart - inject context
-./plugin/bin/claude-mem hook:new       # UserPromptSubmit - create session
-./plugin/bin/claude-mem hook:save      # PostToolUse - save observations
-./plugin/bin/claude-mem hook:summary   # Stop - generate summary
-./plugin/bin/claude-mem hook:cleanup   # SessionEnd - cleanup
-./plugin/bin/claude-mem worker         # Start HTTP worker service
-./plugin/bin/claude-mem version        # Show version
+./bin/claude-mem hook:context   # SessionStart - inject context
+./bin/claude-mem hook:new       # UserPromptSubmit - create session
+./bin/claude-mem hook:save      # PostToolUse - save observations
+./bin/claude-mem hook:summary   # Stop - generate summary
+./bin/claude-mem hook:cleanup   # SessionEnd - cleanup
+./bin/claude-mem worker         # Start HTTP worker service
+./bin/claude-mem version        # Show version
 ```
 
 ### Worker Service
@@ -112,7 +115,7 @@ Then restart Claude Code to pick up the changes.
 The worker service starts automatically when hooks are invoked. To run manually:
 
 ```bash
-./plugin/bin/claude-mem worker
+./bin/claude-mem worker
 # or
 bun run worker:start
 ```
