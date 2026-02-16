@@ -200,7 +200,7 @@ phase3_models() {
         "${MODEL_DIR}/all-MiniLM-L6-v2-Q8_0.gguf"
 
     download_model_if_needed \
-        "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/qwen3-0.6b-q8_0.gguf" \
+        "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf" \
         "${MODEL_DIR}/Qwen3-0.6B-Q8_0.gguf"
 }
 
