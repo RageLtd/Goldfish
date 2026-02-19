@@ -1,6 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import {
+  DEFAULT_EMBED_PORT,
+  DEFAULT_GEN_PORT,
+  serverUrl,
+} from "../../src/constants";
+import {
   createDatabase,
   createSession,
   getObservationById,
@@ -145,9 +150,7 @@ describe("message-router", () => {
 // Integration tests with createProcessMessage
 // ============================================================================
 
-const VALID_TOOL_CALL = `<tool_call>
-{"name": "create_observation", "arguments": {"type": "feature", "title": "Added user authentication", "subtitle": "OAuth2 flow implemented", "narrative": "Implemented OAuth2 PKCE flow for user authentication", "facts": ["Uses PKCE flow", "Supports refresh tokens"], "concepts": ["what-changed"]}}
-</tool_call>`;
+const VALID_TOOL_CALL = `{"name": "create_observation", "arguments": {"type": "feature", "title": "Added user authentication", "subtitle": "OAuth2 flow implemented", "narrative": "Implemented OAuth2 PKCE flow for user authentication", "facts": ["Uses PKCE flow", "Supports refresh tokens"], "concepts": ["what-changed"]}}`;
 
 const createMockModelManager = (
   overrides: { generateTextResponse?: string } = {},
@@ -161,7 +164,8 @@ const createMockModelManager = (
     (): ModelManagerConfig => ({
       generativeModelId: "test-model",
       embeddingModelId: "test-embed-model",
-      cliPath: "",
+      generationUrl: serverUrl(DEFAULT_GEN_PORT),
+      embeddingUrl: serverUrl(DEFAULT_EMBED_PORT),
       cacheDir: "/tmp/test-models",
     }),
   ),
@@ -186,7 +190,11 @@ describe("message-router integration", () => {
 
   it("processes observation message end-to-end", async () => {
     const modelManager = createMockModelManager();
-    const processMessage = createProcessMessage({ db, modelManager });
+    const processMessage = createProcessMessage({
+      db,
+      modelManager,
+      enqueue: () => {},
+    });
     const router = createMessageRouter({ processMessage });
 
     router.enqueue({
@@ -209,14 +217,56 @@ describe("message-router integration", () => {
     }
   });
 
+  it("enqueues embed after successful observation and stores embedding", async () => {
+    const modelManager = createMockModelManager();
+    const processMessage = createProcessMessage({
+      db,
+      modelManager,
+      enqueue: (msg) => router.enqueue(msg),
+    });
+    const router = createMessageRouter({ processMessage });
+
+    router.enqueue({
+      type: "observation",
+      claudeSessionId: "test-session-int",
+      data: {
+        toolName: "Edit",
+        toolInput: { file_path: "/src/app.ts" },
+        toolResponse: "File edited",
+        cwd: "/test-project",
+      },
+    });
+
+    await router.shutdown();
+
+    // Observation should be stored
+    const obs = getObservationById(db, 1);
+    expect(obs.ok).toBe(true);
+    if (!obs.ok || !obs.value) throw new Error("observation not found");
+
+    // Embedding should have been computed via the enqueued embed message
+    const row = db
+      .query<{ embedding: Buffer | null }, [number]>(
+        "SELECT embedding FROM observations WHERE id = ?",
+      )
+      .get(1);
+    expect(row?.embedding).not.toBeNull();
+
+    // generateText for observation + computeEmbedding for embed
+    expect(modelManager.generateText).toHaveBeenCalledTimes(1);
+    expect(modelManager.computeEmbedding).toHaveBeenCalledTimes(1);
+  });
+
   it("processes summarize message end-to-end", async () => {
-    const summaryResponse = `<tool_call>
-{"name": "create_summary", "arguments": {"request": "Build something", "completed": "Built it"}}
-</tool_call>`;
+    const summaryResponse = `{"name": "create_summary", "arguments": {"request": "Build something", "completed": "Built it"}}`;
     const modelManager = createMockModelManager({
       generateTextResponse: summaryResponse,
     });
-    const processMessage = createProcessMessage({ db, modelManager });
+    const processMessage = createProcessMessage({
+      db,
+      modelManager,
+      enqueue: () => {},
+    });
     const router = createMessageRouter({ processMessage });
 
     router.enqueue({
@@ -240,7 +290,11 @@ describe("message-router integration", () => {
 
   it("processes complete message by updating session status", async () => {
     const modelManager = createMockModelManager();
-    const processMessage = createProcessMessage({ db, modelManager });
+    const processMessage = createProcessMessage({
+      db,
+      modelManager,
+      enqueue: () => {},
+    });
     const router = createMessageRouter({ processMessage });
 
     router.enqueue({
@@ -261,7 +315,11 @@ describe("message-router integration", () => {
 
   it("processes embed message by storing computed embedding", async () => {
     const modelManager = createMockModelManager();
-    const processMessage = createProcessMessage({ db, modelManager });
+    const processMessage = createProcessMessage({
+      db,
+      modelManager,
+      enqueue: () => {},
+    });
     const router = createMessageRouter({ processMessage });
 
     // Store an observation first so the embed can update it
@@ -312,7 +370,11 @@ describe("message-router integration", () => {
 
   it("skips messages for unknown sessions", async () => {
     const modelManager = createMockModelManager();
-    const processMessage = createProcessMessage({ db, modelManager });
+    const processMessage = createProcessMessage({
+      db,
+      modelManager,
+      enqueue: () => {},
+    });
     const router = createMessageRouter({ processMessage });
 
     router.enqueue({

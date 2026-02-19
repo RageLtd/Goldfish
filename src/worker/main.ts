@@ -1,30 +1,75 @@
 /**
  * Worker service entry point.
- * Starts an HTTP server that handles memory operations.
+ * Starts llama-server instances, then an HTTP server for memory operations.
  */
 
-import { join } from "node:path";
 import pkg from "../../package.json";
+import {
+  DEFAULT_BINARY_DIR,
+  DEFAULT_DB_PATH,
+  DEFAULT_EMBED_MODEL_PATH,
+  DEFAULT_EMBED_PORT,
+  DEFAULT_GEN_MODEL_PATH,
+  DEFAULT_GEN_PORT,
+  DEFAULT_SERVER_TIMEOUT_MS,
+  DEFAULT_WORKER_PORT,
+} from "../constants";
 import { createDatabase, runMigrations } from "../db/index";
+import { ensureLlamaServer } from "../models/ensure-server";
 import { createModelManager } from "../models/manager";
+import {
+  getOrStartServer,
+  type ManagedServer,
+  stopServer,
+} from "../models/server-manager";
 import { fromPromise } from "../types/result";
 import { ensureDbDir } from "../utils/fs";
 import { createMessageRouter, createProcessMessage } from "./message-router";
 import { createWorkerRouter } from "./service";
 
-const PORT = parseInt(process.env.CLAUDE_MEM_PORT || "3456", 10);
-const DB_PATH =
-  process.env.CLAUDE_MEM_DB ||
-  join(process.env.HOME || "", ".claude-mem", "memory.db");
+// ============================================================================
+// Configuration (env overrides)
+// ============================================================================
+
+const PORT = parseInt(
+  process.env.CLAUDE_MEM_PORT || String(DEFAULT_WORKER_PORT),
+  10,
+);
+const DB_PATH = process.env.CLAUDE_MEM_DB || DEFAULT_DB_PATH;
 const VERSION = pkg.version;
+
+const GEN_PORT = parseInt(
+  process.env.CLAUDE_MEM_LLAMA_GEN_PORT || String(DEFAULT_GEN_PORT),
+  10,
+);
+const EMBED_PORT = parseInt(
+  process.env.CLAUDE_MEM_LLAMA_EMBED_PORT || String(DEFAULT_EMBED_PORT),
+  10,
+);
+const SERVER_TIMEOUT = parseInt(
+  process.env.CLAUDE_MEM_LLAMA_SERVER_TIMEOUT ||
+    String(DEFAULT_SERVER_TIMEOUT_MS),
+  10,
+);
+
+const BINARY_DIR = process.env.CLAUDE_MEM_LLAMA_CLI_PATH || DEFAULT_BINARY_DIR;
+const GEN_MODEL =
+  process.env.CLAUDE_MEM_LLAMA_GENERATION_MODEL || DEFAULT_GEN_MODEL_PATH;
+const EMBED_MODEL =
+  process.env.CLAUDE_MEM_LLAMA_EMBEDDING_MODEL || DEFAULT_EMBED_MODEL_PATH;
+
+// ============================================================================
+// Logging
+// ============================================================================
 
 const log = (message: string) => console.log(`[worker] ${message}`);
 const logError = (message: string) =>
   console.error(`[worker] ERROR: ${message}`);
 
-/**
- * Starts the worker service.
- */
+// ============================================================================
+// Startup
+// ============================================================================
+
 const start = async (): Promise<void> => {
   const startedAt = Date.now();
   log(`Starting worker service on port ${PORT}`);
@@ -32,26 +77,74 @@ const start = async (): Promise<void> => {
 
   const result = await fromPromise(
     (async () => {
-      // Ensure database directory exists
+      // 1. Ensure database directory exists and initialize
       await ensureDbDir(DB_PATH);
-
-      // Initialize database
       const db = createDatabase(DB_PATH);
       runMigrations(db);
       log("Database initialized");
 
-      // Create model manager
-      const modelManager = createModelManager({});
+      // 2. Ensure llama-server binary is available (auto-download if missing)
+      const ensureResult = await ensureLlamaServer(BINARY_DIR);
+      if (!ensureResult.ok) throw ensureResult.error;
+
+      log(
+        `Acquiring llama-server instances (gen=:${GEN_PORT}, embed=:${EMBED_PORT})`,
+      );
+
+      const [genResult, embedResult] = await Promise.all([
+        getOrStartServer(
+          {
+            binaryDir: BINARY_DIR,
+            modelPath: GEN_MODEL,
+            port: GEN_PORT,
+            contextSize: 2048,
+          },
+          SERVER_TIMEOUT,
+        ),
+        getOrStartServer(
+          {
+            binaryDir: BINARY_DIR,
+            modelPath: EMBED_MODEL,
+            port: EMBED_PORT,
+            contextSize: 512,
+            embeddings: true,
+          },
+          SERVER_TIMEOUT,
+        ),
+      ]);
+
+      if (!genResult.ok) throw genResult.error;
+      if (!embedResult.ok) throw embedResult.error;
+
+      const genServer = genResult.value;
+      const embedServer = embedResult.value;
+
+      log(
+        `llama-server ready on port ${GEN_PORT} (generation, owned=${genServer.owned}) and ${EMBED_PORT} (embedding, owned=${embedServer.owned})`,
+      );
+
+      // 4. Create model manager with server URLs
+      const modelManager = createModelManager({
+        generationUrl: genServer.url,
+        embeddingUrl: embedServer.url,
+        generativeModelId: GEN_MODEL,
+        embeddingModelId: EMBED_MODEL,
+      });
       log(
         `ModelManager initialized (gen=${modelManager.getConfig().generativeModelId}, embed=${modelManager.getConfig().embeddingModelId})`,
       );
 
-      // Create message router (replaces SessionManager + BackgroundProcessor)
-      const processMessage = createProcessMessage({ db, modelManager });
-      const messageRouter = createMessageRouter({ processMessage });
+      // 5. Create message router (late-bind enqueue to break circular dep)
+      let messageRouter: ReturnType<typeof createMessageRouter>;
+      const processMessage = createProcessMessage({
+        db,
+        modelManager,
+        enqueue: (msg) => messageRouter.enqueue(msg),
+      });
+      messageRouter = createMessageRouter({ processMessage });
       log("MessageRouter initialized");
 
-      // Create HTTP router with all dependencies
+      // 6. Create HTTP router
       const httpRouter = createWorkerRouter({
         db,
         router: messageRouter,
@@ -60,7 +153,7 @@ const start = async (): Promise<void> => {
         version: VERSION,
       });
 
-      // Start HTTP server
+      // 7. Start HTTP server
       const server = Bun.serve({
         port: PORT,
         fetch: httpRouter.handle,
@@ -68,12 +161,14 @@ const start = async (): Promise<void> => {
 
       log(`Worker service running at http://127.0.0.1:${server.port}`);
 
-      // Handle shutdown
+      // Handle shutdown — stop owned llama-server processes before closing DB
       const shutdown = async () => {
         log("Shutting down...");
         log(`Draining ${messageRouter.pending()} pending messages...`);
         await messageRouter.shutdown();
         await modelManager.dispose();
+        log("Stopping owned llama-server instances...");
+        await cleanupServers(genServer, embedServer);
         db.close();
         server.stop();
         process.exit(0);
@@ -88,6 +183,16 @@ const start = async (): Promise<void> => {
     logError(`Failed to start: ${result.error.message}`);
     process.exit(1);
   }
+};
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+const cleanupServers = async (
+  ...servers: readonly ManagedServer[]
+): Promise<void> => {
+  await Promise.allSettled(servers.map((s) => stopServer(s)));
 };
 
 export const main = start;

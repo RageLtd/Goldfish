@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { DEFAULT_WORKER_PORT, serverUrl } from "../../src/constants";
 import {
   formatSystemMessage,
   type HookDeps,
@@ -29,7 +30,7 @@ describe("hook logic", () => {
     );
     deps = {
       fetch: mockFetch as unknown as typeof fetch,
-      workerUrl: "http://127.0.0.1:3456",
+      workerUrl: serverUrl(DEFAULT_WORKER_PORT),
     };
   });
 
@@ -258,7 +259,7 @@ describe("hook logic", () => {
 
       // Verify the request body
       const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
-      expect(url).toBe("http://127.0.0.1:3456/observation");
+      expect(url).toBe(`${serverUrl(DEFAULT_WORKER_PORT)}/observation`);
       expect(options.method).toBe("POST");
       const body = JSON.parse(options.body as string);
       expect(body.claudeSessionId).toBe("session-123");
@@ -403,6 +404,147 @@ describe("hook logic", () => {
 
       expect(result.continue).toBe(true);
       // Should not store entirely private prompts
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("calls /retrieve alongside /prompt", async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes("/retrieve")) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                context: "# relevant memories",
+                observationCount: 3,
+                typeCounts: { feature: 2, bugfix: 1 },
+              }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ status: "stored" }),
+        });
+      });
+
+      const input: UserPromptSubmitInput = {
+        session_id: "session-123",
+        cwd: "/projects/test",
+        prompt: "Fix the authentication bug in login flow",
+      };
+
+      const result = await processNewHook(deps, input);
+
+      expect(result.continue).toBe(true);
+      // Should have called both /prompt and /retrieve
+      const urls = mockFetch.mock.calls.map(
+        (call: unknown[]) => call[0] as string,
+      );
+      expect(urls.some((u: string) => u.includes("/prompt"))).toBe(true);
+      expect(urls.some((u: string) => u.includes("/retrieve"))).toBe(true);
+    });
+
+    it("returns context when /retrieve finds relevant memories", async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes("/retrieve")) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                context: "# test memories\n\n| ID | Time | ...",
+                observationCount: 5,
+                typeCounts: { decision: 2, feature: 3 },
+              }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ status: "stored" }),
+        });
+      });
+
+      const input: UserPromptSubmitInput = {
+        session_id: "session-123",
+        cwd: "/projects/test",
+        prompt: "Refactor the database layer",
+      };
+
+      const result = await processNewHook(deps, input);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput?.additionalContext).toContain(
+        "test memories",
+      );
+      expect(result.systemMessage).toContain("5 relevant memories");
+      expect(result.hookSpecificOutput?.hookEventName).toBe("UserPromptSubmit");
+    });
+
+    it("returns success when /retrieve finds no results", async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes("/retrieve")) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                context: null,
+                observationCount: 0,
+                typeCounts: {},
+              }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ status: "stored" }),
+        });
+      });
+
+      const input: UserPromptSubmitInput = {
+        session_id: "session-123",
+        cwd: "/projects/test",
+        prompt: "Hello, how are you?",
+      };
+
+      const result = await processNewHook(deps, input);
+
+      expect(result.continue).toBe(true);
+      expect(result.suppressOutput).toBe(true);
+      expect(result.hookSpecificOutput).toBeUndefined();
+    });
+
+    it("returns success when /retrieve errors", async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes("/retrieve")) {
+          return Promise.reject(new Error("Model unavailable"));
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ status: "stored" }),
+        });
+      });
+
+      const input: UserPromptSubmitInput = {
+        session_id: "session-123",
+        cwd: "/projects/test",
+        prompt: "Fix the auth bug",
+      };
+
+      const result = await processNewHook(deps, input);
+
+      // Should not crash, just return success without context
+      expect(result.continue).toBe(true);
+      expect(result.suppressOutput).toBe(true);
+    });
+
+    it("skips retrieval and storage for entirely private prompts", async () => {
+      const input: UserPromptSubmitInput = {
+        session_id: "session-123",
+        cwd: "/projects/test",
+        prompt: "<private>Secret internal discussion</private>",
+      };
+
+      const result = await processNewHook(deps, input);
+
+      expect(result.continue).toBe(true);
+      expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 
@@ -427,7 +569,7 @@ describe("hook logic", () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
 
       const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
-      expect(url).toBe("http://127.0.0.1:3456/summary");
+      expect(url).toBe(`${serverUrl(DEFAULT_WORKER_PORT)}/summary`);
     });
 
     it("handles missing transcript path", async () => {
@@ -496,7 +638,7 @@ describe("hook logic", () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
 
       const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
-      expect(url).toBe("http://127.0.0.1:3456/complete");
+      expect(url).toBe(`${serverUrl(DEFAULT_WORKER_PORT)}/complete`);
       const body = JSON.parse(options.body as string);
       expect(body.reason).toBe("exit");
     });

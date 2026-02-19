@@ -6,11 +6,12 @@
 import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_WORKER_PORT, serverUrl } from "../constants";
 import type { HookOutput } from "../types/hooks";
 import { fromPromise, fromTry } from "../types/result";
 
-const WORKER_PORT = process.env.CLAUDE_MEM_PORT || "3456";
-const WORKER_URL = `http://127.0.0.1:${WORKER_PORT}`;
+const WORKER_PORT = process.env.CLAUDE_MEM_PORT || String(DEFAULT_WORKER_PORT);
+const WORKER_URL = serverUrl(parseInt(WORKER_PORT, 10));
 const HEALTH_TIMEOUT_MS = 1000;
 const WORKER_STARTUP_WAIT_MS = 5000;
 const WORKER_STARTUP_POLL_MS = 200;

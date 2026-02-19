@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "sequential-thinking": {
-      "command": "bunx",
-      "args": ["@modelcontextprotocol/server-sequential-thinking"]
-    }
-  }
-}

@@ -7,6 +7,7 @@
  */
 
 import {
+  getObservationById,
   getSessionByClaudeId,
   updateObservationEmbedding,
   updateSessionStatus,
@@ -104,8 +105,12 @@ export const createMessageRouter = (deps: MessageRouterDeps): MessageRouter => {
 // Process message dispatcher
 // ============================================================================
 
+export interface ProcessMessageDeps extends LocalAgentDeps {
+  readonly enqueue: (msg: RouterMessage) => void;
+}
+
 export const createProcessMessage = (
-  deps: LocalAgentDeps,
+  deps: ProcessMessageDeps,
 ): ((msg: RouterMessage) => Promise<void>) => {
   return async (msg: RouterMessage): Promise<void> => {
     const { db } = deps;
@@ -143,13 +148,30 @@ export const createProcessMessage = (
 
     if (msg.type === "observation") {
       const data = msg.data as ObservationData;
-      await processObservation(deps, context, {
+      const obsResult = await processObservation(deps, context, {
         toolName: data.toolName,
         toolInput: data.toolInput,
         toolResponse: data.toolResponse,
         cwd: data.cwd,
         occurredAt: new Date().toISOString(),
       });
+
+      // Enqueue embedding computation for newly stored observations
+      if (obsResult.ok && obsResult.value !== null) {
+        const obsId = obsResult.value;
+        const obsData = getObservationById(db, obsId);
+        if (obsData.ok && obsData.value) {
+          deps.enqueue({
+            type: "embed",
+            claudeSessionId: msg.claudeSessionId,
+            data: {
+              observationId: obsId,
+              title: obsData.value.title ?? "",
+              narrative: obsData.value.narrative ?? "",
+            },
+          });
+        }
+      }
       return;
     }
 

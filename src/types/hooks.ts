@@ -69,12 +69,13 @@ export const createSuccessOutput = (suppressOutput = true): HookOutput => ({
 export const createContextOutput = (
   context: string,
   systemMessage?: string,
+  hookEventName = "SessionStart",
 ): HookOutput => ({
   continue: true,
   suppressOutput: false,
   systemMessage,
   hookSpecificOutput: {
-    hookEventName: "SessionStart",
+    hookEventName,
     additionalContext: context,
   },
 });

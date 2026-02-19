@@ -294,7 +294,8 @@ export const processSaveHook = async (
 };
 
 /**
- * Processes UserPromptSubmit hook - stores prompt.
+ * Processes UserPromptSubmit hook - stores prompt and retrieves relevant context.
+ * Runs prompt storage and memory retrieval in parallel.
  */
 export const processNewHook = async (
   deps: HookDeps,
@@ -306,15 +307,51 @@ export const processNewHook = async (
   }
 
   const cleanedPrompt = cleanPrompt(input.prompt);
+  const project = extractProject(input.cwd);
 
-  // Fire-and-forget
-  await fromPromise(
-    postToWorker(deps, "/prompt", {
-      claudeSessionId: input.session_id,
-      prompt: cleanedPrompt,
-      cwd: input.cwd,
-    }),
-  );
+  // Run storage and retrieval in parallel
+  const [, retrieveResult] = await Promise.all([
+    // Fire-and-forget: store the prompt
+    fromPromise(
+      postToWorker(deps, "/prompt", {
+        claudeSessionId: input.session_id,
+        prompt: cleanedPrompt,
+        cwd: input.cwd,
+      }),
+    ),
+    // Synchronous: retrieve relevant memories
+    project
+      ? fromPromise(
+          postToWorker(deps, "/retrieve", {
+            prompt: cleanedPrompt,
+            project,
+            limit: 20,
+          }),
+        )
+      : Promise.resolve({ ok: false as const, error: new Error("no project") }),
+  ]);
+
+  // If retrieval succeeded and has context, return it
+  if (retrieveResult.ok) {
+    const result = retrieveResult.value as {
+      context?: string | null;
+      observationCount?: number;
+      typeCounts?: Record<string, number>;
+    };
+
+    if (
+      result.context &&
+      result.observationCount &&
+      result.observationCount > 0
+    ) {
+      const systemMessage = `[claude-mem] ${result.observationCount} relevant memories found for this prompt`;
+      return createContextOutput(
+        result.context,
+        systemMessage,
+        "UserPromptSubmit",
+      );
+    }
+  }
 
   return createSuccessOutput();
 };

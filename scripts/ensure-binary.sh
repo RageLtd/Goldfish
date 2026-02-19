@@ -12,10 +12,12 @@ set -e
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="RageLtd/claude-mem"
+LLAMA_REPO="ggml-org/llama.cpp"
 DATA_DIR="${HOME}/.claude-mem"
 BIN_DIR="${DATA_DIR}/bin"
 MODEL_DIR="${DATA_DIR}/models"
 VERSION_FILE="${DATA_DIR}/.version"
+LLAMA_SERVER_VERSION_FILE="${DATA_DIR}/.llama-server-version"
 
 # ============================================================================
 # Platform Detection
@@ -86,6 +88,27 @@ get_stored_version() {
     fi
 }
 
+# Fetch the latest release tag from ggml-org/llama.cpp
+get_latest_llama_tag() {
+    local headers
+    headers=$(head_request "https://github.com/${LLAMA_REPO}/releases/latest")
+    echo "$headers" | grep -i '^location:' | sed 's|.*/tag/||' | tr -d '[:space:]'
+}
+
+# Map OS/ARCH to llama.cpp release tarball naming convention
+get_llama_platform_suffix() {
+    case "${OS}-${ARCH}" in
+        darwin-arm64) echo "macos-arm64" ;;
+        darwin-x64)   echo "macos-x64" ;;
+        linux-arm64)  echo "linux-aarch64" ;;
+        linux-x64)    echo "linux-x64" ;;
+        *)
+            echo "[claude-mem] ERROR: No llama.cpp release for ${OS}-${ARCH}" >&2
+            exit 1
+            ;;
+    esac
+}
+
 # ============================================================================
 # Phase 1: claude-mem binary
 # ============================================================================
@@ -153,6 +176,73 @@ phase2_llama_binaries() {
 }
 
 # ============================================================================
+# Phase 2b: llama-server binary (from ggml-org/llama.cpp)
+# ============================================================================
+
+phase2b_llama_server() {
+    local stored_llama_version=""
+    if [ -f "$LLAMA_SERVER_VERSION_FILE" ]; then
+        stored_llama_version=$(cat "$LLAMA_SERVER_VERSION_FILE")
+    fi
+
+    # Skip if binary exists and version is stored (re-check on new releases)
+    if [ -x "${BIN_DIR}/llama-server" ] && [ -n "$stored_llama_version" ]; then
+        local latest_llama_tag
+        latest_llama_tag=$(get_latest_llama_tag)
+        if [ -n "$latest_llama_tag" ] && [ "$latest_llama_tag" = "$stored_llama_version" ]; then
+            return 0
+        fi
+    fi
+
+    local latest_llama_tag
+    latest_llama_tag=$(get_latest_llama_tag)
+
+    if [ -z "$latest_llama_tag" ]; then
+        echo "[claude-mem] ERROR: Could not determine latest llama.cpp release" >&2
+        exit 1
+    fi
+
+    local platform_suffix
+    platform_suffix=$(get_llama_platform_suffix)
+
+    echo "[claude-mem] Downloading llama-server ${latest_llama_tag} (${platform_suffix})..." >&2
+
+    mkdir -p "$BIN_DIR"
+    # Release tarballs are named like: llama-b5678-bin-macos-arm64.tar.gz
+    local tag_number="${latest_llama_tag}"
+    local url="https://github.com/${LLAMA_REPO}/releases/download/${latest_llama_tag}/llama-${tag_number}-bin-${platform_suffix}.tar.gz"
+    local tmp_tar
+    tmp_tar=$(mktemp "${TMPDIR:-/tmp}/llama-server-XXXXXX.tar.gz")
+
+    download "$url" "$tmp_tar"
+
+    # Extract only llama-server binary (may be nested in build/bin/)
+    local tmp_extract
+    tmp_extract=$(mktemp -d "${TMPDIR:-/tmp}/llama-server-extract-XXXXXX")
+    tar xzf "$tmp_tar" -C "$tmp_extract"
+
+    # Find llama-server in extracted contents (handles varying directory structure)
+    local server_bin
+    server_bin=$(find "$tmp_extract" -name "llama-server" -type f | head -1)
+
+    if [ -z "$server_bin" ]; then
+        echo "[claude-mem] ERROR: llama-server binary not found in release tarball" >&2
+        rm -rf "$tmp_tar" "$tmp_extract"
+        exit 1
+    fi
+
+    cp "$server_bin" "${BIN_DIR}/llama-server"
+    chmod +x "${BIN_DIR}/llama-server"
+    rm -rf "$tmp_tar" "$tmp_extract"
+
+    # Store version
+    mkdir -p "$DATA_DIR"
+    echo "$latest_llama_tag" > "$LLAMA_SERVER_VERSION_FILE"
+
+    echo "[claude-mem] llama-server installed (${latest_llama_tag})" >&2
+}
+
+# ============================================================================
 # Phase 3: GGUF models
 # ============================================================================
 
@@ -210,6 +300,7 @@ phase3_models() {
 
 phase1_claude_mem
 phase2_llama_binaries
+phase2b_llama_server
 phase3_models
 
 # Output valid hook JSON (Claude Code requires JSON on stdout from hook commands)
