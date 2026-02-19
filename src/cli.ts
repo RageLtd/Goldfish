@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 /**
- * Unified CLI for claude-mem-bun.
+ * Unified CLI for goldfish.
  * Single binary with subcommands to reduce plugin size.
  *
  * Usage:
- *   claude-mem <command> [args]
+ *   goldfish <command> [args]
  *
  * Commands:
  *   hook:context    - SessionStart hook (inject context)
@@ -49,14 +49,14 @@ const COMMANDS: Record<string, () => Promise<void>> = {
     await main();
   },
   version: async () => {
-    console.log(`claude-mem-bun v${pkg.version}`);
+    console.log(`goldfish v${pkg.version}`);
   },
 };
 
 const showHelp = () => {
-  console.log(`claude-mem-bun v${pkg.version}
+  console.log(`goldfish v${pkg.version}
 
-Usage: claude-mem <command>
+Usage: goldfish <command>
 
 Commands:
   hook:context    SessionStart hook - inject past context
@@ -69,8 +69,8 @@ Commands:
   version         Show version
 
 Examples:
-  claude-mem worker                    # Start the worker service
-  echo '{}' | claude-mem hook:context  # Run context hook with stdin
+  goldfish worker                    # Start the worker service
+  echo '{}' | goldfish hook:context  # Run context hook with stdin
 `);
 };
 
@@ -85,7 +85,7 @@ const main = async () => {
   const handler = COMMANDS[command];
   if (!handler) {
     console.error(`Unknown command: ${command}`);
-    console.error(`Run 'claude-mem --help' for usage`);
+    console.error(`Run 'goldfish --help' for usage`);
     process.exit(1);
   }
 

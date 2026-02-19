@@ -49,8 +49,8 @@ jobs:
 
       - name: Build binary
         run: |
-          bun build --compile --minify src/cli.ts --outfile claude-mem
-          ls -lh claude-mem
+          bun build --compile --minify src/cli.ts --outfile goldfish
+          ls -lh goldfish
 
   version-preview:
     name: Version Preview

@@ -18,30 +18,30 @@ Hooks are **thin HTTP clients** that:
 {
   "hooks": {
     "SessionStart": [
-      { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:context" }
+      { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:context" }
     ],
     "UserPromptSubmit": [
-      { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:new" }
+      { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:new" }
     ],
     "PostToolUse": [
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:save" }
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:save" }
         ]
       }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:summary" }] }
+      { "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:summary" }] }
     ],
     "SessionEnd": [
-      { "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:cleanup" }] }
+      { "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:cleanup" }] }
     ]
   }
 }
 ```
 
-> **Note:** All hooks use a single unified CLI binary (`claude-mem`) with subcommands. This reduces plugin size from ~400MB to ~58MB. Run `bun run build` to rebuild.
+> **Note:** All hooks use a single unified CLI binary (`goldfish`) with subcommands. This reduces plugin size from ~400MB to ~58MB. Run `bun run build` to rebuild.
 
 ## Hook Lifecycle
 
@@ -88,7 +88,7 @@ interface SessionStartInput {
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "# [claude-mem] recent context\n\n..."
+    "additionalContext": "# [goldfish] recent context\n\n..."
   }
 }
 ```
@@ -291,7 +291,7 @@ function createHookResponse(hookName: string, success: boolean): string {
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "# Context injected by claude-mem..."
+    "additionalContext": "# Context injected by goldfish..."
   }
 }
 ```
@@ -342,7 +342,7 @@ try {
 Two functions for different contexts:
 
 1. **stripMemoryTagsFromPrompt** - For user prompts
-   - Strips `<private>` and `<claude-mem-context>` tags
+   - Strips `<private>` and `<goldfish-context>` tags
    - Returns empty string if entire prompt is private
 
 2. **stripMemoryTagsFromJson** - For JSON contexts
@@ -353,7 +353,7 @@ Two functions for different contexts:
 ```typescript
 function stripMemoryTags(content: string): string {
   return content
-    .replace(/<claude-mem-context>[\s\S]*?<\/claude-mem-context>/g, '')
+    .replace(/<goldfish-context>[\s\S]*?<\/goldfish-context>/g, '')
     .replace(/<private>[\s\S]*?<\/private>/g, '')
     .trim();
 }
@@ -367,19 +367,19 @@ All components are compiled into a single unified CLI binary:
 # Build command
 bun run build
 
-# Output: bin/claude-mem (single ~58MB binary)
+# Output: bin/goldfish (single ~58MB binary)
 ```
 
 The CLI provides subcommands for all functionality:
 
 ```bash
-claude-mem hook:context    # SessionStart hook
-claude-mem hook:new        # UserPromptSubmit hook
-claude-mem hook:save       # PostToolUse hook
-claude-mem hook:summary    # Stop hook
-claude-mem hook:cleanup    # SessionEnd hook
-claude-mem worker          # Start HTTP worker service
-claude-mem version         # Show version
+goldfish hook:context    # SessionStart hook
+goldfish hook:new        # UserPromptSubmit hook
+goldfish hook:save       # PostToolUse hook
+goldfish hook:summary    # Stop hook
+goldfish hook:cleanup    # SessionEnd hook
+goldfish worker          # Start HTTP worker service
+goldfish version         # Show version
 ```
 
 This unified approach reduces plugin size from ~400MB (7 separate binaries) to ~58MB (1 binary with subcommands).
@@ -426,7 +426,7 @@ Hooks use `silentDebug()` to log without disrupting Claude Code:
 import { silentDebug } from '../utils/silent-debug';
 
 silentDebug('[hook-name] Message', { data });
-// Writes to ~/.claude-mem/silent.log
+// Writes to ~/.goldfish/silent.log
 ```
 
 ### Console Error for User Messages

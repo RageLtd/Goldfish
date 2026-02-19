@@ -1,6 +1,6 @@
-# claude-mem
+# Goldfish
 
-Persistent memory system for Claude Code. Captures tool executions via lifecycle hooks, extracts semantic meaning through local LLMs (llama.cpp), stores in SQLite with FTS5, and injects relevant context into new sessions.
+Claude Code plugin for persistent agent memory — because your AI shouldn't have the memory of a goldfish. Captures tool executions via lifecycle hooks, extracts semantic meaning through local LLMs (llama.cpp), stores in SQLite with FTS5, and injects relevant context into new sessions.
 
 ## Commands
 
@@ -8,7 +8,7 @@ Persistent memory system for Claude Code. Captures tool executions via lifecycle
 bun install              # Install dependencies
 bun test                 # Run all tests
 bun test tests/unit/     # Run unit tests only
-bun run build            # Compile standalone binary (output: bin/claude-mem)
+bun run build            # Compile standalone binary (output: bin/goldfish)
 bun run worker:start     # Start worker service locally
 bunx biome check --write .  # Format + lint
 ```

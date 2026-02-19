@@ -32,31 +32,31 @@ import { createWorkerRouter } from "./service";
 // ============================================================================
 
 const PORT = parseInt(
-  process.env.CLAUDE_MEM_PORT || String(DEFAULT_WORKER_PORT),
+  process.env.GOLDFISH_PORT || String(DEFAULT_WORKER_PORT),
   10,
 );
-const DB_PATH = process.env.CLAUDE_MEM_DB || DEFAULT_DB_PATH;
+const DB_PATH = process.env.GOLDFISH_DB || DEFAULT_DB_PATH;
 const VERSION = pkg.version;
 
 const GEN_PORT = parseInt(
-  process.env.CLAUDE_MEM_LLAMA_GEN_PORT || String(DEFAULT_GEN_PORT),
+  process.env.GOLDFISH_LLAMA_GEN_PORT || String(DEFAULT_GEN_PORT),
   10,
 );
 const EMBED_PORT = parseInt(
-  process.env.CLAUDE_MEM_LLAMA_EMBED_PORT || String(DEFAULT_EMBED_PORT),
+  process.env.GOLDFISH_LLAMA_EMBED_PORT || String(DEFAULT_EMBED_PORT),
   10,
 );
 const SERVER_TIMEOUT = parseInt(
-  process.env.CLAUDE_MEM_LLAMA_SERVER_TIMEOUT ||
+  process.env.GOLDFISH_LLAMA_SERVER_TIMEOUT ||
     String(DEFAULT_SERVER_TIMEOUT_MS),
   10,
 );
 
-const BINARY_DIR = process.env.CLAUDE_MEM_LLAMA_CLI_PATH || DEFAULT_BINARY_DIR;
+const BINARY_DIR = process.env.GOLDFISH_LLAMA_CLI_PATH || DEFAULT_BINARY_DIR;
 const GEN_MODEL =
-  process.env.CLAUDE_MEM_LLAMA_GENERATION_MODEL || DEFAULT_GEN_MODEL_PATH;
+  process.env.GOLDFISH_LLAMA_GENERATION_MODEL || DEFAULT_GEN_MODEL_PATH;
 const EMBED_MODEL =
-  process.env.CLAUDE_MEM_LLAMA_EMBEDDING_MODEL || DEFAULT_EMBED_MODEL_PATH;
+  process.env.GOLDFISH_LLAMA_EMBEDDING_MODEL || DEFAULT_EMBED_MODEL_PATH;
 
 // ============================================================================
 // Logging

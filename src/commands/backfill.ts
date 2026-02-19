@@ -25,14 +25,14 @@ import { buildEmbeddingText } from "../utils/embedding";
 
 const BATCH_SIZE = 50;
 
-const DB_PATH = process.env.CLAUDE_MEM_DB || DEFAULT_DB_PATH;
-const BINARY_DIR = process.env.CLAUDE_MEM_LLAMA_CLI_PATH || DEFAULT_BINARY_DIR;
+const DB_PATH = process.env.GOLDFISH_DB || DEFAULT_DB_PATH;
+const BINARY_DIR = process.env.GOLDFISH_LLAMA_CLI_PATH || DEFAULT_BINARY_DIR;
 const EMBED_PORT = parseInt(
-  process.env.CLAUDE_MEM_LLAMA_EMBED_PORT || String(DEFAULT_EMBED_PORT),
+  process.env.GOLDFISH_LLAMA_EMBED_PORT || String(DEFAULT_EMBED_PORT),
   10,
 );
 const SERVER_TIMEOUT = parseInt(
-  process.env.CLAUDE_MEM_LLAMA_SERVER_TIMEOUT ||
+  process.env.GOLDFISH_LLAMA_SERVER_TIMEOUT ||
     String(DEFAULT_SERVER_TIMEOUT_MS),
   10,
 );
@@ -54,7 +54,7 @@ export const main = async (): Promise<void> => {
 
   // Get or start embedding server (reuses worker's if running)
   const embedModelPath =
-    process.env.CLAUDE_MEM_LLAMA_EMBEDDING_MODEL || DEFAULT_EMBED_MODEL_PATH;
+    process.env.GOLDFISH_LLAMA_EMBEDDING_MODEL || DEFAULT_EMBED_MODEL_PATH;
 
   const serverResult = await getOrStartServer(
     {

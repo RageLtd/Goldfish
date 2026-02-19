@@ -11,7 +11,7 @@ import { join } from "node:path";
 
 const HOME = process.env.HOME || "";
 
-export const DATA_DIR = join(HOME, ".claude-mem");
+export const DATA_DIR = join(HOME, ".goldfish");
 export const DEFAULT_BINARY_DIR = join(DATA_DIR, "bin");
 export const DEFAULT_MODEL_DIR = join(DATA_DIR, "models");
 export const DEFAULT_DB_PATH = join(DATA_DIR, "memory.db");

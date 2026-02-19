@@ -1,5 +1,5 @@
 /**
- * Database migrations for claude-mem.
+ * Database migrations for goldfish.
  * Each migration is a pure function that takes a database and applies changes.
  */
 

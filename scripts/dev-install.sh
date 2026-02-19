@@ -9,13 +9,13 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PLUGIN_CACHE="$HOME/.claude/plugins/cache/rageltd/claude-mem-bun/1.0.0"
+PLUGIN_CACHE="$HOME/.claude/plugins/cache/rageltd/goldfish/1.0.0"
 
 echo "[dev] Building binary..."
 cd "$PROJECT_ROOT"
 bun run build
 
-if [ ! -f "$PROJECT_ROOT/bin/claude-mem" ]; then
+if [ ! -f "$PROJECT_ROOT/bin/goldfish" ]; then
     echo "[dev] ERROR: Build failed - binary not found"
     exit 1
 fi
@@ -26,8 +26,8 @@ mkdir -p "$PLUGIN_CACHE/scripts"
 mkdir -p "$PLUGIN_CACHE/skills"
 
 # Copy binary
-cp "$PROJECT_ROOT/bin/claude-mem" "$PLUGIN_CACHE/bin/claude-mem"
-chmod +x "$PLUGIN_CACHE/bin/claude-mem"
+cp "$PROJECT_ROOT/bin/goldfish" "$PLUGIN_CACHE/bin/goldfish"
+chmod +x "$PLUGIN_CACHE/bin/goldfish"
 
 # Copy scripts
 cp "$PROJECT_ROOT/scripts/ensure-binary.sh" "$PLUGIN_CACHE/scripts/"
@@ -43,5 +43,5 @@ cp -r "$PROJECT_ROOT/skills/"* "$PLUGIN_CACHE/skills/"
 cp "$PROJECT_ROOT/.claude-plugin/plugin.json" "$PLUGIN_CACHE/.claude-plugin/plugin.json"
 
 echo "[dev] Installed successfully!"
-echo "[dev] Binary: $PLUGIN_CACHE/bin/claude-mem"
+echo "[dev] Binary: $PLUGIN_CACHE/bin/goldfish"
 echo "[dev] Restart Claude Code to use the updated plugin"

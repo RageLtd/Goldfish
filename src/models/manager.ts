@@ -107,16 +107,16 @@ export const createModelManager = (deps: ModelManagerDeps): ModelManager => {
   const config: ModelManagerConfig = {
     generativeModelId:
       deps.generativeModelId ||
-      process.env.CLAUDE_MEM_LLAMA_GENERATION_MODEL ||
+      process.env.GOLDFISH_LLAMA_GENERATION_MODEL ||
       DEFAULT_GEN_MODEL_PATH,
     embeddingModelId:
       deps.embeddingModelId ||
-      process.env.CLAUDE_MEM_LLAMA_EMBEDDING_MODEL ||
+      process.env.GOLDFISH_LLAMA_EMBEDDING_MODEL ||
       DEFAULT_EMBED_MODEL_PATH,
     generationUrl: deps.generationUrl,
     embeddingUrl: deps.embeddingUrl,
     cacheDir:
-      deps.cacheDir || process.env.CLAUDE_MEM_MODEL_DIR || DEFAULT_MODEL_DIR,
+      deps.cacheDir || process.env.GOLDFISH_MODEL_DIR || DEFAULT_MODEL_DIR,
   };
 
   const generateText = async (

@@ -5,7 +5,7 @@ description: Search project memory for past observations, decisions, and session
 
 # Memory Search Skill
 
-Search the claude-mem database for observations, decisions, summaries, and session history from past work.
+Search the goldfish database for observations, decisions, summaries, and session history from past work.
 
 ## Progressive Disclosure
 

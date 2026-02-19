@@ -1,5 +1,5 @@
 {
-  "name": "claude-mem-bun",
+  "name": "goldfish",
   "version": "2.1.1",
   "module": "src/index.ts",
   "type": "module",

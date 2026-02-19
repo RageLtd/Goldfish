@@ -8,7 +8,7 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh",
             "timeout": 600,
-            "statusMessage": "Setting up claude-mem (first run may download ~700MB)..."
+            "statusMessage": "Setting up goldfish (first run may download ~700MB)..."
           }
         ]
       },
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:context"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:context"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:new"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:new"
           }
         ]
       }
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:save"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:save"
           }
         ]
       }
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:summary"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:summary"
           }
         ]
       }
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:cleanup"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:cleanup"
           }
         ]
       }

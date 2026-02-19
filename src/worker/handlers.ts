@@ -631,10 +631,10 @@ export const handleGetContext = async (
   }
 
   const halfLifeDays = Number.parseInt(
-    process.env.CLAUDE_MEM_RECENCY_HALFLIFE_DAYS || "2",
+    process.env.GOLDFISH_RECENCY_HALFLIFE_DAYS || "2",
     10,
   );
-  const crossProjectEnabled = process.env.CLAUDE_MEM_CROSS_PROJECT !== "false";
+  const crossProjectEnabled = process.env.GOLDFISH_CROSS_PROJECT !== "false";
 
   const scoringContext: ScoringContext = {
     currentProject: project,

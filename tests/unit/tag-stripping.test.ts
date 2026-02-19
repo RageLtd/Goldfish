@@ -51,19 +51,18 @@ After`;
 });
 
 describe("stripContextTags", () => {
-  it("removes claude-mem-context tags", () => {
-    const input =
-      "Hello <claude-mem-context>injected</claude-mem-context> world";
+  it("removes goldfish-context tags", () => {
+    const input = "Hello <goldfish-context>injected</goldfish-context> world";
     expect(stripContextTags(input)).toBe("Hello  world");
   });
 
   it("handles multiline context", () => {
     const input = `Start
-<claude-mem-context>
+<goldfish-context>
 # Context
 - item 1
 - item 2
-</claude-mem-context>
+</goldfish-context>
 End`;
     expect(stripContextTags(input)).toBe("Start\n\nEnd");
   });
@@ -72,13 +71,13 @@ End`;
 describe("stripAllMemoryTags", () => {
   it("removes both private and context tags without trimming", () => {
     const input =
-      "<private>secret</private> public <claude-mem-context>ctx</claude-mem-context>";
+      "<private>secret</private> public <goldfish-context>ctx</goldfish-context>";
     expect(stripAllMemoryTags(input)).toBe(" public ");
   });
 
   it("preserves internal whitespace", () => {
     const input =
-      "  <private>x</private>  hello  <claude-mem-context>y</claude-mem-context>  ";
+      "  <private>x</private>  hello  <goldfish-context>y</goldfish-context>  ";
     expect(stripAllMemoryTags(input)).toBe("    hello    ");
   });
 });
@@ -86,7 +85,7 @@ describe("stripAllMemoryTags", () => {
 describe("cleanPrompt", () => {
   it("strips tags and trims result", () => {
     const input =
-      "  <private>x</private>  hello  <claude-mem-context>y</claude-mem-context>  ";
+      "  <private>x</private>  hello  <goldfish-context>y</goldfish-context>  ";
     expect(cleanPrompt(input)).toBe("hello");
   });
 
