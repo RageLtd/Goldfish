@@ -72,14 +72,12 @@ describe("projectFromCwd", () => {
 
 describe("projectFromCwd — git-aware", () => {
   it("uses git repo root name for a repo directory", () => {
-    // We're running inside the claude-mem repo (or a worktree of it)
+    // We're running inside the repo (directory may vary: claude-mem, Goldfish, etc.)
     const cwd = process.cwd();
     const result = projectFromCwd(cwd);
     // Should resolve to the main repo name, not a worktree leaf name
     expect(result).not.toBe("unknown");
     expect(result.length).toBeGreaterThan(0);
-    // Local dir is "claude-mem-bun", CI checkout is "claude-mem"
-    expect(result).toMatch(/^claude-mem/);
   });
 
   it("falls back to basename for non-git directories", () => {

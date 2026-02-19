@@ -1,5 +1,5 @@
 /**
- * Database layer for claude-mem.
+ * Database layer for goldfish.
  * All functions are pure (take db as parameter) for easy testing.
  */
 

@@ -1,5 +1,5 @@
 /**
- * Core domain types for claude-mem.
+ * Core domain types for goldfish.
  * All types are immutable (readonly) and represent the business domain.
  */
 

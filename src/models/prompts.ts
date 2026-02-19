@@ -112,6 +112,26 @@ export const SUMMARY_TOOL: ToolDefinition = {
   },
 };
 
+export const SEARCH_MEMORY_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "search_memory",
+    description:
+      "Search for relevant memories matching the user's prompt. Call with a concise search query.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "Concise search keywords extracted from the user's prompt (2-5 words)",
+        },
+      },
+      required: ["query"],
+    },
+  },
+};
+
 // ============================================================================
 // System Prompt
 // ============================================================================
@@ -158,6 +178,14 @@ export const buildLocalObservationPrompt = (
   return `Tool: ${toolName}
 Input: ${inputSummary}
 Result: ${responseSummary}`;
+};
+
+export const buildSearchMemoryPrompt = (prompt: string): string => {
+  return `Extract search keywords from this user prompt. Call search_memory with a concise query (2-5 words) that captures the core topic.
+
+User prompt: ${prompt.slice(0, 500)}
+
+If the prompt is a greeting, small talk, or has no searchable technical content, do NOT call any tool.`;
 };
 
 export interface SummaryPromptInput {

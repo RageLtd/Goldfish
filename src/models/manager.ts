@@ -1,15 +1,18 @@
 /**
- * Model lifecycle manager using llama.cpp CLI binaries.
- * Invokes llama-embedding and llama-completion via Bun.spawn()
- * for embedding and text generation respectively.
+ * Model lifecycle manager using persistent llama-server instances.
+ * Delegates to server-client.ts for HTTP calls to /v1/completions
+ * and /v1/embeddings endpoints.
  *
- * Expects GGUF model files on disk and llama.cpp binaries in
- * ~/.claude-mem/bin/ (or configured via CLAUDE_MEM_LLAMA_CLI_PATH).
+ * Callers must start llama-server processes (via server-manager.ts)
+ * before creating a ModelManager, and stop them after dispose().
  */
 
-import { mkdtemp, rmdir, unlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import {
+  DEFAULT_EMBED_MODEL_PATH,
+  DEFAULT_GEN_MODEL_PATH,
+  DEFAULT_MODEL_DIR,
+} from "../constants";
+import { serverComputeEmbedding, serverGenerateText } from "./server-client";
 
 // ============================================================================
 // Types
@@ -18,14 +21,16 @@ import { join } from "node:path";
 export interface ModelManagerConfig {
   readonly generativeModelId: string;
   readonly embeddingModelId: string;
-  readonly cliPath: string;
+  readonly generationUrl: string;
+  readonly embeddingUrl: string;
   readonly cacheDir: string;
 }
 
 export interface ModelManagerDeps {
   readonly generativeModelId?: string;
   readonly embeddingModelId?: string;
-  readonly cliPath?: string;
+  readonly generationUrl: string;
+  readonly embeddingUrl: string;
   readonly cacheDir?: string;
 }
 
@@ -57,14 +62,6 @@ export interface ToolDefinition {
 // Defaults
 // ============================================================================
 
-const DEFAULT_CACHE_DIR = join(process.env.HOME || "", ".claude-mem", "models");
-const DEFAULT_CLI_PATH = join(process.env.HOME || "", ".claude-mem", "bin");
-const DEFAULT_GEN_MODEL = join(DEFAULT_CACHE_DIR, "Qwen3-0.6B-Q8_0.gguf");
-const DEFAULT_EMBED_MODEL = join(
-  DEFAULT_CACHE_DIR,
-  "all-MiniLM-L6-v2-Q8_0.gguf",
-);
-
 // ============================================================================
 // Qwen3 Chat Template
 // ============================================================================
@@ -74,7 +71,7 @@ const DEFAULT_EMBED_MODEL = join(
  * When tools are provided, they're injected into the system message
  * and non-thinking mode is forced via an empty <think> block.
  */
-const formatQwen3Prompt = (
+export const formatQwen3Prompt = (
   messages: readonly ChatMessage[],
   tools?: readonly ToolDefinition[],
 ): string => {
@@ -82,7 +79,6 @@ const formatQwen3Prompt = (
 
   for (const msg of messages) {
     if (msg.role === "system" && tools && tools.length > 0) {
-      // Inject tool definitions into system message
       const toolDefs = tools.map((t) => ({
         type: t.type,
         function: {
@@ -104,60 +100,6 @@ const formatQwen3Prompt = (
 };
 
 // ============================================================================
-// CLI Helpers
-// ============================================================================
-
-/**
- * Resolves the full path to a llama.cpp binary.
- * If cliPath is a directory, appends the binary name.
- * Otherwise assumes it's already a prefix or that binaries are on PATH.
- */
-const resolveBinary = (cliPath: string, name: string): string => {
-  if (cliPath === "") return name;
-  return join(cliPath, name);
-};
-
-/**
- * Runs a CLI process and returns stdout.
- * Returns an error result if the process exits non-zero.
- * Sets DYLD_LIBRARY_PATH (macOS) and LD_LIBRARY_PATH (Linux) so
- * llama.cpp shared libs are found alongside the binaries.
- */
-const runProcess = async (
-  args: readonly string[],
-  cliPath: string,
-): Promise<
-  | { readonly ok: true; readonly stdout: string }
-  | { readonly ok: false; readonly error: string }
-> => {
-  const env =
-    cliPath !== ""
-      ? {
-          ...process.env,
-          DYLD_LIBRARY_PATH: cliPath,
-          LD_LIBRARY_PATH: cliPath,
-        }
-      : undefined;
-
-  const proc = Bun.spawn(args as string[], {
-    stdout: "pipe",
-    stderr: "ignore",
-    env,
-  });
-
-  const [stdout, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    proc.exited,
-  ]);
-
-  if (exitCode !== 0) {
-    return { ok: false, error: `${args[0]} exited with code ${exitCode}` };
-  }
-
-  return { ok: true, stdout };
-};
-
-// ============================================================================
 // Factory
 // ============================================================================
 
@@ -165,16 +107,16 @@ export const createModelManager = (deps: ModelManagerDeps): ModelManager => {
   const config: ModelManagerConfig = {
     generativeModelId:
       deps.generativeModelId ||
-      process.env.CLAUDE_MEM_LLAMA_GENERATION_MODEL ||
-      DEFAULT_GEN_MODEL,
+      process.env.GOLDFISH_LLAMA_GENERATION_MODEL ||
+      DEFAULT_GEN_MODEL_PATH,
     embeddingModelId:
       deps.embeddingModelId ||
-      process.env.CLAUDE_MEM_LLAMA_EMBEDDING_MODEL ||
-      DEFAULT_EMBED_MODEL,
-    cliPath:
-      deps.cliPath || process.env.CLAUDE_MEM_LLAMA_CLI_PATH || DEFAULT_CLI_PATH,
+      process.env.GOLDFISH_LLAMA_EMBEDDING_MODEL ||
+      DEFAULT_EMBED_MODEL_PATH,
+    generationUrl: deps.generationUrl,
+    embeddingUrl: deps.embeddingUrl,
     cacheDir:
-      deps.cacheDir || process.env.CLAUDE_MEM_MODEL_DIR || DEFAULT_CACHE_DIR,
+      deps.cacheDir || process.env.GOLDFISH_MODEL_DIR || DEFAULT_MODEL_DIR,
   };
 
   const generateText = async (
@@ -183,96 +125,27 @@ export const createModelManager = (deps: ModelManagerDeps): ModelManager => {
   ): Promise<string> => {
     const prompt = formatQwen3Prompt(messages, tools);
 
-    // Write prompt to temp file to avoid shell escaping issues
-    const tmpDir = await mkdtemp(join(tmpdir(), "llama-"));
-    const promptFile = join(tmpDir, "prompt.txt");
+    const result = await serverGenerateText(config.generationUrl, prompt);
 
-    try {
-      await Bun.write(promptFile, prompt);
-
-      const allStops = ["<|im_end|>", "[end of text]"];
-      const stopArgs = allStops.flatMap((s) => ["-r", s]);
-
-      const binary = resolveBinary(config.cliPath, "llama-completion");
-      const result = await runProcess(
-        [
-          binary,
-          "-m",
-          config.generativeModelId,
-          "-no-cnv",
-          "-f",
-          promptFile,
-          "-n",
-          "512",
-          "--no-display-prompt",
-          "--temp",
-          "0.7",
-          "--top-p",
-          "0.8",
-          "--top-k",
-          "20",
-          "--min-p",
-          "0.0",
-          "--presence-penalty",
-          "1.0",
-          "-c",
-          "2048",
-          "-ngl",
-          "99",
-          ...stopArgs,
-        ],
-        config.cliPath,
-      );
-
-      if (!result.ok) {
-        throw new Error(result.error);
-      }
-
-      // Trim stop sequences from output
-      let output = result.stdout.trim();
-      for (const s of allStops) {
-        const idx = output.indexOf(s);
-        if (idx !== -1) {
-          output = output.slice(0, idx);
-        }
-      }
-      return output.trim();
-    } finally {
-      await unlink(promptFile).catch(() => {});
-      await rmdir(tmpDir).catch(() => {});
+    if (!result.ok) {
+      throw result.error;
     }
+
+    return result.value;
   };
 
   const computeEmbedding = async (text: string): Promise<Float32Array> => {
-    const binary = resolveBinary(config.cliPath, "llama-embedding");
-    const result = await runProcess(
-      [
-        binary,
-        "-m",
-        config.embeddingModelId,
-        "-p",
-        text,
-        "--embd-output-format",
-        "json",
-        "--embd-normalize",
-        "2",
-        "-ngl",
-        "99",
-      ],
-      config.cliPath,
-    );
+    const result = await serverComputeEmbedding(config.embeddingUrl, text);
 
     if (!result.ok) {
-      throw new Error(result.error);
+      throw result.error;
     }
 
-    const parsed = JSON.parse(result.stdout);
-    const embedding: number[] = parsed.data?.[0]?.embedding ?? [];
-    return new Float32Array(embedding);
+    return result.value;
   };
 
   const dispose = async (): Promise<void> => {
-    // No-op: each CLI call is self-contained, no persistent state
+    // Server lifecycle is managed externally (main.ts / caller)
   };
 
   return {

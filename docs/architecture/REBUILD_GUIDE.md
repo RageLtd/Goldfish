@@ -1,6 +1,6 @@
-# Claude-Mem Rebuild Guide
+# Goldfish Rebuild Guide
 
-**Purpose:** Step-by-step guide to rebuild claude-mem from scratch using the architecture documentation.
+**Purpose:** Step-by-step guide to rebuild goldfish from scratch using the architecture documentation.
 
 ## System Requirements
 
@@ -11,7 +11,7 @@
 
 ## Architecture Summary
 
-Claude-mem is a persistent memory system for Claude Code that:
+Goldfish is a persistent memory system for Claude Code that:
 
 1. **Captures** tool executions via lifecycle hooks
 2. **Processes** observations through Claude AI to extract semantic meaning
@@ -177,11 +177,11 @@ Create `hooks/hooks.json`:
 ```json
 {
   "hooks": {
-    "SessionStart": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:context" }],
-    "UserPromptSubmit": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:new" }],
-    "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:save" }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:summary" }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-mem hook:cleanup" }] }]
+    "SessionStart": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:context" }],
+    "UserPromptSubmit": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:new" }],
+    "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:save" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:summary" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:cleanup" }] }]
   }
 }
 ```
@@ -232,7 +232,7 @@ Create prompts that instruct Claude to be an **observer, not executor**:
 ```typescript
 // buildInitPrompt - First user prompt
 function buildInitPrompt(project: string, sessionId: string, userPrompt: string): string {
-  return `You are Claude-Mem, a specialized observer tool...
+  return `You are Goldfish, a specialized observer tool...
     CRITICAL: Record what was LEARNED/BUILT/FIXED, not what you are doing.
     Focus on deliverables and capabilities.`;
 }
@@ -350,7 +350,7 @@ await Bun.build({
   "scripts": {
     "build": "bun scripts/build.ts",
     "test": "bun test",
-    "worker": "./bin/claude-mem worker"
+    "worker": "./bin/goldfish worker"
   }
 }
 ```
@@ -363,7 +363,7 @@ await Bun.build({
 - `createSDKSession()` is idempotent (INSERT OR IGNORE)
 
 ### Privacy Tags
-- Strip `<private>` and `<claude-mem-context>` tags before storage
+- Strip `<private>` and `<goldfish-context>` tags before storage
 - Skip memory operations if entire prompt is private
 - Implemented in `utils/tag-stripping.ts`
 
@@ -404,7 +404,7 @@ describe('full-lifecycle', () => {
 ## Directory Structure
 
 ```
-claude-mem/
+goldfish/
 ├── src/
 │   ├── hooks/              # Hook implementations
 │   ├── services/
@@ -435,5 +435,5 @@ bun run build
 bun test
 
 # Start worker manually (auto-started by hooks)
-./bin/claude-mem worker
+./bin/goldfish worker
 ```

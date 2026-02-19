@@ -18,6 +18,8 @@ import {
   searchSummaries,
 } from "../db/index";
 import type { ModelManager } from "../models/manager";
+import { buildSearchMemoryPrompt, SEARCH_MEMORY_TOOL } from "../models/prompts";
+import { parseSearchToolCall } from "../models/tool-call-parser";
 import {
   formatContextFull,
   formatContextIndex,
@@ -147,6 +149,12 @@ export interface QueuePromptInput {
   readonly claudeSessionId: string;
   readonly prompt: string;
   readonly cwd: string;
+}
+
+export interface RetrieveInput {
+  readonly prompt: string;
+  readonly project: string;
+  readonly limit: number;
 }
 
 // ============================================================================
@@ -341,6 +349,156 @@ export const handleQueuePrompt = async (
 };
 
 /**
+ * Retrieve relevant memories for a user prompt.
+ * Uses the local model to extract search keywords, then queries FTS5
+ * with optional embedding re-ranking.
+ */
+export const handleRetrieve = async (
+  deps: WorkerDeps,
+  input: RetrieveInput,
+): Promise<HandlerResponse> => {
+  const { prompt, project, limit } = input;
+
+  if (!prompt) {
+    return {
+      status: 400,
+      body: { error: "prompt is required" },
+    };
+  }
+
+  if (!deps.modelManager) {
+    return {
+      status: 503,
+      body: { error: "Model manager unavailable" },
+    };
+  }
+
+  // Use local model to extract search keywords from the prompt
+  const searchPrompt = buildSearchMemoryPrompt(prompt);
+  let modelOutput: string;
+  try {
+    modelOutput = await deps.modelManager.generateText(
+      [
+        {
+          role: "system",
+          content:
+            "You extract search keywords from user prompts. Call search_memory with a concise query.",
+        },
+        { role: "user", content: searchPrompt },
+      ],
+      [SEARCH_MEMORY_TOOL],
+    );
+  } catch {
+    return {
+      status: 500,
+      body: { error: "Model generation failed" },
+    };
+  }
+
+  // Parse the tool call
+  const toolCall = parseSearchToolCall(modelOutput);
+  if (!toolCall) {
+    // Model decided prompt is not searchable (greeting, small talk, etc.)
+    return {
+      status: 200,
+      body: {
+        context: null,
+        observationCount: 0,
+        typeCounts: {},
+      },
+    };
+  }
+
+  const query = toolCall.arguments.query;
+  const escapedQuery = escapeFts5Query(query);
+
+  // Search with extra headroom for re-ranking
+  const fetchLimit = deps.modelManager ? limit * 2 : limit;
+  const searchResult = searchObservations(deps.db, {
+    query: escapedQuery,
+    limit: fetchLimit,
+  });
+
+  if (!searchResult.ok) {
+    return {
+      status: 500,
+      body: { error: searchResult.error.message },
+    };
+  }
+
+  let observations = searchResult.value;
+
+  // Re-rank with embedding similarity
+  if (observations.length > 0) {
+    try {
+      const queryEmbedding = await deps.modelManager.computeEmbedding(query);
+      const ids = observations.map((o) => o.id);
+      const embeddingsResult = getEmbeddingsByIds(deps.db, { ids });
+
+      if (embeddingsResult.ok) {
+        const embeddings = embeddingsResult.value;
+        const scored = observations.map((obs, index) => {
+          const ftsScore = 1 - index / observations.length;
+          const stored = embeddings.get(obs.id);
+          const embScore = stored
+            ? cosineSimilarity(queryEmbedding, stored)
+            : 0;
+          return {
+            observation: obs,
+            combined: 0.6 * ftsScore + 0.4 * embScore,
+          };
+        });
+
+        scored.sort((a, b) => b.combined - a.combined);
+        observations = scored.slice(0, limit).map((s) => s.observation);
+
+        // Enqueue missing embeddings
+        if (deps.router) {
+          enqueueMissingEmbeddings(
+            deps.router,
+            searchResult.value,
+            new Set(embeddings.keys()),
+          );
+        }
+      }
+    } catch {
+      // Embedding failed — fall through with FTS-only results
+    }
+  }
+
+  observations = observations.slice(0, limit);
+
+  if (observations.length === 0) {
+    return {
+      status: 200,
+      body: {
+        context: null,
+        observationCount: 0,
+        typeCounts: {},
+      },
+    };
+  }
+
+  // Compute type counts
+  const typeCounts: Record<string, number> = {};
+  for (const obs of observations) {
+    typeCounts[obs.type] = (typeCounts[obs.type] ?? 0) + 1;
+  }
+
+  // Format as index (same progressive disclosure format as SessionStart)
+  const context = formatContextIndex(project, observations, []);
+
+  return {
+    status: 200,
+    body: {
+      context,
+      observationCount: observations.length,
+      typeCounts,
+    },
+  };
+};
+
+/**
  * Queue a summary request.
  */
 export const handleQueueSummary = async (
@@ -473,10 +631,10 @@ export const handleGetContext = async (
   }
 
   const halfLifeDays = Number.parseInt(
-    process.env.CLAUDE_MEM_RECENCY_HALFLIFE_DAYS || "2",
+    process.env.GOLDFISH_RECENCY_HALFLIFE_DAYS || "2",
     10,
   );
-  const crossProjectEnabled = process.env.CLAUDE_MEM_CROSS_PROJECT !== "false";
+  const crossProjectEnabled = process.env.GOLDFISH_CROSS_PROJECT !== "false";
 
   const scoringContext: ScoringContext = {
     currentProject: project,

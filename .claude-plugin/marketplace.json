@@ -5,18 +5,18 @@
   },
   "metadata": {
     "description": "Plugins by RageLtd",
-    "homepage": "https://github.com/rageltd/claude-mem"
+    "homepage": "https://github.com/RageLtd/Goldfish"
   },
   "plugins": [
     {
-      "name": "claude-mem-bun",
+      "name": "goldfish",
       "version": "2.1.1",
       "source": {
         "source": "github",
-        "repo": "rageltd/claude-mem",
+        "repo": "RageLtd/Goldfish",
         "ref": "v2.1.1"
       },
-      "description": "Persistent memory system for Claude Code - context compression across sessions"
+      "description": "Claude Code plugin for persistent agent memory — because your AI shouldn't have the memory of a goldfish."
     }
   ]
 }

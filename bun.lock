@@ -5,7 +5,7 @@
     "": {
       "name": "claude-mem-bun",
       "devDependencies": {
-        "@biomejs/biome": "^2.3.8",
+        "@biomejs/biome": "^2.4.0",
         "@types/bun": "latest",
       },
       "peerDependencies": {

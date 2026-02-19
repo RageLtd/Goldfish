@@ -23,6 +23,15 @@ export interface ToolCallResult {
   readonly arguments: ToolCallArguments;
 }
 
+export interface SearchToolCallArguments {
+  readonly query: string;
+}
+
+export interface SearchToolCallResult {
+  readonly name: string;
+  readonly arguments: SearchToolCallArguments;
+}
+
 export interface SummaryToolCallArguments {
   readonly request?: string;
   readonly investigated?: string;
@@ -42,18 +51,18 @@ export interface SummaryToolCallResult {
 // ============================================================================
 
 /**
- * Extracts a raw JSON object from a tool_call block.
- * Returns null if no valid tool call is found.
+ * Extracts a tool call JSON object from model output.
+ * Parses bare JSON with "name" and "arguments" keys from /v1/completions output.
  */
 const extractToolCallJson = (
   text: string,
 ): { name: string; rawArgs: Record<string, unknown> } | null => {
-  const match = text.match(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/);
-  if (!match) return null;
+  const jsonStr = findToolCallJson(text);
+  if (!jsonStr) return null;
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(match[1].trim());
+    parsed = JSON.parse(jsonStr);
   } catch {
     return null;
   }
@@ -77,6 +86,28 @@ const extractToolCallJson = (
   }
 
   return { name, rawArgs: args as Record<string, unknown> };
+};
+
+/**
+ * Finds the outermost JSON object containing "name" and "arguments" keys.
+ */
+const findToolCallJson = (text: string): string | null => {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}") depth--;
+    if (depth === 0) {
+      const candidate = text.slice(start, i + 1);
+      if (candidate.includes('"name"') && candidate.includes('"arguments"')) {
+        return candidate;
+      }
+      return null;
+    }
+  }
+  return null;
 };
 
 // ============================================================================
@@ -153,6 +184,35 @@ export const parseSummaryToolCall = (
       completed: optStr("completed"),
       nextSteps: optStr("nextSteps"),
       notes: optStr("notes"),
+    },
+  };
+};
+
+// ============================================================================
+// Search Tool Call Parser
+// ============================================================================
+
+/**
+ * Parses a search_memory tool call from model output.
+ * Returns null if no tool call is present (model decided prompt is not searchable)
+ * or if the tool call is malformed.
+ */
+export const parseSearchToolCall = (
+  text: string,
+): SearchToolCallResult | null => {
+  const extracted = extractToolCallJson(text);
+  if (!extracted || extracted.name !== "search_memory") return null;
+
+  const { rawArgs } = extracted;
+
+  if (typeof rawArgs.query !== "string" || rawArgs.query.trim() === "") {
+    return null;
+  }
+
+  return {
+    name: "search_memory",
+    arguments: {
+      query: rawArgs.query.trim(),
     },
   };
 };

@@ -6,6 +6,11 @@
 import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import {
+  DEFAULT_EMBED_PORT,
+  DEFAULT_GEN_PORT,
+  serverUrl,
+} from "../../src/constants";
+import {
   createDatabase,
   createSession,
   getObservationById,
@@ -41,7 +46,8 @@ const createMockModelManager = (
     (): ModelManagerConfig => ({
       generativeModelId: "test-model",
       embeddingModelId: "test-embed-model",
-      cliPath: "",
+      generationUrl: serverUrl(DEFAULT_GEN_PORT),
+      embeddingUrl: serverUrl(DEFAULT_EMBED_PORT),
       cacheDir: "/tmp/test-models",
     }),
   );

@@ -1,21 +1,23 @@
 #!/bin/bash
 #
-# ensure-binary.sh - Downloads claude-mem binary, llama.cpp binaries, and GGUF models
+# ensure-binary.sh - Downloads goldfish binary, llama-server, and GGUF models
 # Called by SessionStart hook before running context loading
 #
-# Phase 1: Download claude-mem binary (if missing or outdated)
-# Phase 2: Download llama.cpp binaries (if missing or outdated)
+# Phase 1: Download goldfish binary (if missing or outdated)
+# Phase 2: Download llama-server from ggml-org/llama.cpp (if missing or outdated)
 # Phase 3: Download GGUF models (if missing or outdated)
 #
 
 set -e
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-REPO="RageLtd/claude-mem"
-DATA_DIR="${HOME}/.claude-mem"
+REPO="RageLtd/Goldfish"
+LLAMA_REPO="ggml-org/llama.cpp"
+DATA_DIR="${HOME}/.goldfish"
 BIN_DIR="${DATA_DIR}/bin"
 MODEL_DIR="${DATA_DIR}/models"
 VERSION_FILE="${DATA_DIR}/.version"
+LLAMA_SERVER_VERSION_FILE="${DATA_DIR}/.llama-server-version"
 
 # ============================================================================
 # Platform Detection
@@ -25,7 +27,7 @@ case "$(uname -s)" in
     Darwin) OS="darwin" ;;
     Linux)  OS="linux" ;;
     *)
-        echo "[claude-mem] ERROR: Unsupported OS: $(uname -s)" >&2
+        echo "[goldfish] ERROR: Unsupported OS: $(uname -s)" >&2
         exit 1
         ;;
 esac
@@ -34,7 +36,7 @@ case "$(uname -m)" in
     arm64|aarch64) ARCH="arm64" ;;
     x86_64|amd64)  ARCH="x64" ;;
     *)
-        echo "[claude-mem] ERROR: Unsupported architecture: $(uname -m)" >&2
+        echo "[goldfish] ERROR: Unsupported architecture: $(uname -m)" >&2
         exit 1
         ;;
 esac
@@ -53,7 +55,7 @@ download() {
     elif command -v wget &> /dev/null; then
         wget -q -O "$dest" "$url"
     else
-        echo "[claude-mem] ERROR: Neither curl nor wget found" >&2
+        echo "[goldfish] ERROR: Neither curl nor wget found" >&2
         exit 1
     fi
 }
@@ -86,12 +88,33 @@ get_stored_version() {
     fi
 }
 
+# Fetch the latest release tag from ggml-org/llama.cpp
+get_latest_llama_tag() {
+    local headers
+    headers=$(head_request "https://github.com/${LLAMA_REPO}/releases/latest")
+    echo "$headers" | grep -i '^location:' | sed 's|.*/tag/||' | tr -d '[:space:]'
+}
+
+# Map OS/ARCH to llama.cpp release tarball naming convention
+get_llama_platform_suffix() {
+    case "${OS}-${ARCH}" in
+        darwin-arm64) echo "macos-arm64" ;;
+        darwin-x64)   echo "macos-x64" ;;
+        linux-arm64)  echo "linux-aarch64" ;;
+        linux-x64)    echo "linux-x64" ;;
+        *)
+            echo "[goldfish] ERROR: No llama.cpp release for ${OS}-${ARCH}" >&2
+            exit 1
+            ;;
+    esac
+}
+
 # ============================================================================
-# Phase 1: claude-mem binary
+# Phase 1: goldfish binary
 # ============================================================================
 
-phase1_claude_mem() {
-    local binary="$PLUGIN_ROOT/bin/claude-mem"
+phase1_goldfish() {
+    local binary="$PLUGIN_ROOT/bin/goldfish"
     local latest_tag
     latest_tag=$(get_latest_tag)
     local stored_version
@@ -102,10 +125,10 @@ phase1_claude_mem() {
         return 0
     fi
 
-    echo "[claude-mem] Downloading claude-mem binary (${PLATFORM})..." >&2
+    echo "[goldfish] Downloading goldfish binary (${PLATFORM})..." >&2
 
     mkdir -p "$PLUGIN_ROOT/bin"
-    local url="https://github.com/${REPO}/releases/latest/download/claude-mem-${PLATFORM}"
+    local url="https://github.com/${REPO}/releases/latest/download/goldfish-${PLATFORM}"
     download "$url" "$binary"
     chmod +x "$binary"
 
@@ -113,43 +136,80 @@ phase1_claude_mem() {
     mkdir -p "$DATA_DIR"
     echo "$latest_tag" > "$VERSION_FILE"
 
-    echo "[claude-mem] claude-mem binary installed" >&2
+    echo "[goldfish] goldfish binary installed" >&2
 }
 
 # ============================================================================
-# Phase 2: llama.cpp binaries
+# Phase 2: llama-server binary (from ggml-org/llama.cpp)
 # ============================================================================
 
-phase2_llama_binaries() {
-    local latest_tag
-    latest_tag=$(get_latest_tag)
-    local stored_version
-    stored_version=$(get_stored_version)
-
-    # Skip if binaries exist and version matches
-    if [ -x "${BIN_DIR}/llama-completion" ] && [ -x "${BIN_DIR}/llama-embedding" ] \
-       && [ -n "$latest_tag" ] && [ "$latest_tag" = "$stored_version" ]; then
-        return 0
+phase2_llama_server() {
+    local stored_llama_version=""
+    if [ -f "$LLAMA_SERVER_VERSION_FILE" ]; then
+        stored_llama_version=$(cat "$LLAMA_SERVER_VERSION_FILE")
     fi
 
-    echo "[claude-mem] Downloading llama.cpp binaries (${PLATFORM})..." >&2
+    # Skip if binary exists and version is stored (re-check on new releases)
+    if [ -x "${BIN_DIR}/llama-server" ] && [ -n "$stored_llama_version" ]; then
+        local latest_llama_tag
+        latest_llama_tag=$(get_latest_llama_tag)
+        if [ -n "$latest_llama_tag" ] && [ "$latest_llama_tag" = "$stored_llama_version" ]; then
+            return 0
+        fi
+    fi
+
+    local latest_llama_tag
+    latest_llama_tag=$(get_latest_llama_tag)
+
+    if [ -z "$latest_llama_tag" ]; then
+        echo "[goldfish] ERROR: Could not determine latest llama.cpp release" >&2
+        exit 1
+    fi
+
+    local platform_suffix
+    platform_suffix=$(get_llama_platform_suffix)
+
+    echo "[goldfish] Downloading llama-server ${latest_llama_tag} (${platform_suffix})..." >&2
 
     mkdir -p "$BIN_DIR"
-    local url="https://github.com/${REPO}/releases/latest/download/llama-${PLATFORM}.tar.gz"
+    # Release tarballs are named like: llama-b5678-bin-macos-arm64.tar.gz
+    local tag_number="${latest_llama_tag}"
+    local url="https://github.com/${LLAMA_REPO}/releases/download/${latest_llama_tag}/llama-${tag_number}-bin-${platform_suffix}.tar.gz"
     local tmp_tar
-    tmp_tar=$(mktemp "${TMPDIR:-/tmp}/llama-XXXXXX.tar.gz")
+    tmp_tar=$(mktemp "${TMPDIR:-/tmp}/llama-server-XXXXXX.tar.gz")
 
     download "$url" "$tmp_tar"
-    tar xzf "$tmp_tar" -C "$BIN_DIR"
-    rm -f "$tmp_tar"
 
-    chmod +x "${BIN_DIR}/llama-completion" "${BIN_DIR}/llama-embedding"
+    # Extract only llama-server binary (may be nested in build/bin/)
+    local tmp_extract
+    tmp_extract=$(mktemp -d "${TMPDIR:-/tmp}/llama-server-extract-XXXXXX")
+    tar xzf "$tmp_tar" -C "$tmp_extract"
 
-    # Update version file (shared with phase 1)
+    # Find llama-server in extracted contents (handles varying directory structure)
+    local server_bin
+    server_bin=$(find "$tmp_extract" -name "llama-server" -type f | head -1)
+
+    if [ -z "$server_bin" ]; then
+        echo "[goldfish] ERROR: llama-server binary not found in release tarball" >&2
+        rm -rf "$tmp_tar" "$tmp_extract"
+        exit 1
+    fi
+
+    cp "$server_bin" "${BIN_DIR}/llama-server"
+    chmod +x "${BIN_DIR}/llama-server"
+
+    # Copy shared libraries (.dylib on macOS, .so on Linux) from same directory
+    local server_dir
+    server_dir=$(dirname "$server_bin")
+    find "$server_dir" \( -name "*.dylib" -o -name "*.so" \) -exec cp {} "${BIN_DIR}/" \;
+
+    rm -rf "$tmp_tar" "$tmp_extract"
+
+    # Store version
     mkdir -p "$DATA_DIR"
-    echo "$latest_tag" > "$VERSION_FILE"
+    echo "$latest_llama_tag" > "$LLAMA_SERVER_VERSION_FILE"
 
-    echo "[claude-mem] llama.cpp binaries installed" >&2
+    echo "[goldfish] llama-server installed (${latest_llama_tag})" >&2
 }
 
 # ============================================================================
@@ -180,7 +240,7 @@ download_model_if_needed() {
 
     local filename
     filename=$(basename "$dest")
-    echo "[claude-mem] Downloading model ${filename}..." >&2
+    echo "[goldfish] Downloading model ${filename}..." >&2
 
     download "$url" "$dest"
 
@@ -189,7 +249,7 @@ download_model_if_needed() {
         echo "$remote_etag" > "$etag_file"
     fi
 
-    echo "[claude-mem] Model ${filename} installed" >&2
+    echo "[goldfish] Model ${filename} installed" >&2
 }
 
 phase3_models() {
@@ -208,8 +268,8 @@ phase3_models() {
 # Main
 # ============================================================================
 
-phase1_claude_mem
-phase2_llama_binaries
+phase1_goldfish
+phase2_llama_server
 phase3_models
 
 # Output valid hook JSON (Claude Code requires JSON on stdout from hook commands)
