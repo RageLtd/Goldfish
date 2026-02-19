@@ -1,7 +1,7 @@
 {
   "name": "goldfish",
   "description": "Claude Code plugin for persistent agent memory — because your AI shouldn't have the memory of a goldfish.",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "author": {
     "name": "RageLtd"
   }
