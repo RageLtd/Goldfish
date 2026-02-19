@@ -1,7 +1,7 @@
 # Database Schema Documentation
 
 **Database:** SQLite with WAL mode
-**Location:** `~/.claude-mem/claude-mem.db`
+**Location:** `~/.goldfish/goldfish.db`
 **Runtime:** bun:sqlite (Bun's built-in SQLite)
 
 ## Schema Overview
@@ -341,7 +341,7 @@ class DatabaseManager {
   private db: Database;
 
   async initialize(): Promise<void> {
-    const dbPath = path.join(DATA_DIR, 'claude-mem.db');
+    const dbPath = path.join(DATA_DIR, 'goldfish.db');
     this.db = new Database(dbPath);
 
     // Enable WAL mode for better concurrency

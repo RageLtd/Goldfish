@@ -1,4 +1,4 @@
-# Claude-Mem Architecture Overview
+# Goldfish Architecture Overview
 
 **Version:** 7.0.0
 **Runtime:** Bun
@@ -6,7 +6,7 @@
 
 ## System Overview
 
-Claude-mem is a plugin for Claude Code that provides persistent memory by:
+Goldfish is a plugin for Claude Code that provides persistent memory by:
 1. **Capturing** tool executions (observations) via lifecycle hooks
 2. **Processing** observations through Claude SDK to extract semantic meaning
 3. **Storing** processed data in SQLite with FTS5 full-text search
@@ -106,7 +106,7 @@ Uses Anthropic Agent SDK to spawn Claude subprocess for:
    └─► Claude Code executes tool (Bash, Read, Write, etc.)
 
 3. HOOK CAPTURE (save-hook)
-   ├─► Strip <private> and <claude-mem-context> tags
+   ├─► Strip <private> and <goldfish-context> tags
    ├─► Skip if tool in SKIP_TOOLS list
    └─► HTTP POST to /api/sessions/observations
 
@@ -155,7 +155,7 @@ Tags stripped at hook layer before reaching worker.
 ```typescript
 // In save-hook
 const cleanInput = stripMemoryTags(JSON.stringify(tool_input));
-// <private> and <claude-mem-context> content removed
+// <private> and <goldfish-context> content removed
 ```
 
 ### Progressive Context Injection
@@ -173,19 +173,19 @@ const context = formatContext({
 
 ### Environment Variables
 ```bash
-CLAUDE_MEM_PORT=3456              # Worker HTTP port (default: 3456)
-CLAUDE_MEM_DB=~/.claude-mem/memory.db  # Database path
-CLAUDE_MEM_MODEL=claude-haiku-4-5 # SDK model
-CLAUDE_MEM_LOG_LEVEL=INFO         # Logging level
+GOLDFISH_PORT=3456              # Worker HTTP port (default: 3456)
+GOLDFISH_DB=~/.goldfish/memory.db  # Database path
+GOLDFISH_MODEL=claude-haiku-4-5 # SDK model
+GOLDFISH_LOG_LEVEL=INFO         # Logging level
 ```
 
-### Settings File (~/.claude-mem/settingson)
+### Settings File (~/.goldfish/settingson)
 ```json
 {
   "env": {
-    "CLAUDE_MEM_CONTEXT_OBSERVATIONS": "50",
-    "CLAUDE_MEM_CONTEXT_FULL_COUNT": "5",
-    "CLAUDE_MEM_CONTEXT_SESSION_COUNT": "10"
+    "GOLDFISH_CONTEXT_OBSERVATIONS": "50",
+    "GOLDFISH_CONTEXT_FULL_COUNT": "5",
+    "GOLDFISH_CONTEXT_SESSION_COUNT": "10"
   }
 }
 ```
@@ -193,7 +193,7 @@ CLAUDE_MEM_LOG_LEVEL=INFO         # Logging level
 ## File Organization
 
 ```
-claude-mem-bun/
+goldfish/
 ├── src/                          # TypeScript source
 │   ├── hooks/                    # Lifecycle hook implementations
 │   ├── services/

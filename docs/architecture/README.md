@@ -1,6 +1,6 @@
-# Claude-Mem Architecture Documentation
+# Goldfish Architecture Documentation
 
-This directory contains comprehensive documentation for the claude-mem plugin architecture, providing sufficient detail to rebuild the project from scratch.
+This directory contains comprehensive documentation for the goldfish plugin architecture, providing sufficient detail to rebuild the project from scratch.
 
 ## Documentation Index
 
@@ -31,7 +31,7 @@ This directory contains comprehensive documentation for the claude-mem plugin ar
 
 ## System Summary
 
-Claude-mem is a persistent memory system for Claude Code that:
+Goldfish is a persistent memory system for Claude Code that:
 
 ```
 ┌───────────────────────────────────────────────────────────────────┐

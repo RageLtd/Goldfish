@@ -29,10 +29,10 @@ export const stripPrivateTags = (content: string): string => {
 };
 
 /**
- * Strips <claude-mem-context>...</claude-mem-context> tags and their content from text.
+ * Strips <goldfish-context>...</goldfish-context> tags and their content from text.
  */
 export const stripContextTags = (content: string): string =>
-  content.replace(/<claude-mem-context>[\s\S]*?<\/claude-mem-context>/g, "");
+  content.replace(/<goldfish-context>[\s\S]*?<\/goldfish-context>/g, "");
 
 /**
  * Strips <system-reminder>...</system-reminder> tags and their content from text.

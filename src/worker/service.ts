@@ -18,10 +18,12 @@ import {
   handleQueueObservation,
   handleQueuePrompt,
   handleQueueSummary,
+  handleRetrieve,
   handleSearch,
   type QueueObservationInput,
   type QueuePromptInput,
   type QueueSummaryInput,
+  type RetrieveInput,
   type WorkerDeps,
 } from "./handlers";
 
@@ -139,6 +141,24 @@ const handlePromptRoute = async (
     claudeSessionId: body.claudeSessionId || "",
     prompt: body.prompt || "",
     cwd: body.cwd || "",
+  });
+
+  return jsonResponse(result.status, result.body);
+};
+
+const handleRetrieveRoute = async (
+  deps: WorkerDeps,
+  request: Request,
+): Promise<Response> => {
+  const body = await parseJsonBody<RetrieveInput>(request);
+  if (!body) {
+    return jsonResponse(400, { error: "Invalid JSON body" });
+  }
+
+  const result = await handleRetrieve(deps, {
+    prompt: body.prompt || "",
+    project: body.project ? sanitizeProject(body.project) : "unknown",
+    limit: body.limit || 20,
   });
 
   return jsonResponse(result.status, result.body);
@@ -294,6 +314,7 @@ const routes: readonly Route[] = [
   { method: "POST", path: "/observation", handler: handleObservationRoute },
   { method: "POST", path: "/summary", handler: handleSummaryRoute },
   { method: "POST", path: "/prompt", handler: handlePromptRoute },
+  { method: "POST", path: "/retrieve", handler: handleRetrieveRoute },
   { method: "POST", path: "/complete", handler: handleCompleteRoute },
   { method: "GET", path: "/context", handler: handleContextRoute },
   { method: "GET", path: "/search", handler: handleSearchRoute },

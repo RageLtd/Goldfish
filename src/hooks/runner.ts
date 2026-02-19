@@ -6,11 +6,12 @@
 import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_WORKER_PORT, serverUrl } from "../constants";
 import type { HookOutput } from "../types/hooks";
 import { fromPromise, fromTry } from "../types/result";
 
-const WORKER_PORT = process.env.CLAUDE_MEM_PORT || "3456";
-const WORKER_URL = `http://127.0.0.1:${WORKER_PORT}`;
+const WORKER_PORT = process.env.GOLDFISH_PORT || String(DEFAULT_WORKER_PORT);
+const WORKER_URL = serverUrl(parseInt(WORKER_PORT, 10));
 const HEALTH_TIMEOUT_MS = 1000;
 const WORKER_STARTUP_WAIT_MS = 5000;
 const WORKER_STARTUP_POLL_MS = 200;
@@ -67,14 +68,14 @@ const isWorkerHealthy = async (): Promise<boolean> => {
 };
 
 /**
- * Gets the path to the claude-mem binary.
+ * Gets the path to the goldfish binary.
  * Handles both development (bun run) and compiled binary cases.
  */
 const getWorkerBinPath = (): string => {
   // Check if CLAUDE_PLUGIN_ROOT is set (running as plugin)
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
   if (pluginRoot) {
-    return join(pluginRoot, "bin", "claude-mem");
+    return join(pluginRoot, "bin", "goldfish");
   }
 
   // Fallback: use Bun.main which gives us the actual script path
@@ -87,8 +88,8 @@ const getWorkerBinPath = (): string => {
   // Last resort: check common locations
   const homeDir = process.env.HOME || "";
   const possiblePaths = [
-    join(homeDir, ".claude-mem", "bin", "claude-mem"),
-    join(process.cwd(), "plugin", "bin", "claude-mem"),
+    join(homeDir, ".goldfish", "bin", "goldfish"),
+    join(process.cwd(), "plugin", "bin", "goldfish"),
   ];
 
   for (const p of possiblePaths) {
@@ -118,7 +119,7 @@ const startWorker = (): void => {
       stdio: "ignore",
       env: {
         ...process.env,
-        CLAUDE_MEM_PORT: WORKER_PORT,
+        GOLDFISH_PORT: WORKER_PORT,
       },
     });
 

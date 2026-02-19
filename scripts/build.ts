@@ -1,5 +1,5 @@
 /**
- * Build script for claude-mem unified CLI.
+ * Build script for goldfish unified CLI.
  * Compiles TypeScript to a single standalone executable using `bun build --compile`.
  * This reduces plugin size from ~400MB (7 binaries) to ~58MB (1 binary).
  */
@@ -18,7 +18,7 @@ const build = async (): Promise<void> => {
   await Bun.write(`${OUT_DIR}/.keep`, "");
 
   const entrypoint = `${SRC_DIR}/cli.ts`;
-  const outfile = `${OUT_DIR}/claude-mem`;
+  const outfile = `${OUT_DIR}/goldfish`;
 
   log("Compiling unified CLI binary...");
 
@@ -39,16 +39,16 @@ const build = async (): Promise<void> => {
   const stat = await Bun.file(outfile).stat();
   const sizeMB = (stat.size / 1024 / 1024).toFixed(1);
 
-  log(`Compiled claude-mem (${sizeMB}MB)`);
+  log(`Compiled goldfish (${sizeMB}MB)`);
   log(`Build completed! Binary at ${outfile}`);
   log("");
   log("Usage:");
-  log("  ./bin/claude-mem hook:context   # SessionStart hook");
-  log("  ./bin/claude-mem hook:new       # UserPromptSubmit hook");
-  log("  ./bin/claude-mem hook:save      # PostToolUse hook");
-  log("  ./bin/claude-mem hook:summary   # Stop hook");
-  log("  ./bin/claude-mem hook:cleanup   # SessionEnd hook");
-  log("  ./bin/claude-mem worker         # Start worker service");
+  log("  ./bin/goldfish hook:context   # SessionStart hook");
+  log("  ./bin/goldfish hook:new       # UserPromptSubmit hook");
+  log("  ./bin/goldfish hook:save      # PostToolUse hook");
+  log("  ./bin/goldfish hook:summary   # Stop hook");
+  log("  ./bin/goldfish hook:cleanup   # SessionEnd hook");
+  log("  ./bin/goldfish worker         # Start worker service");
 };
 
 build();

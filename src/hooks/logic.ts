@@ -97,10 +97,10 @@ export const DEFAULT_SKIP_TOOLS = ["TodoRead", "TodoWrite", "LS"] as const;
 
 /**
  * Returns the set of tool names to skip.
- * Reads from CLAUDE_MEM_SKIP_TOOLS env var (comma-separated) or uses defaults.
+ * Reads from GOLDFISH_SKIP_TOOLS env var (comma-separated) or uses defaults.
  */
 export const getSkipTools = (): ReadonlySet<string> => {
-  const envVar = process.env.CLAUDE_MEM_SKIP_TOOLS;
+  const envVar = process.env.GOLDFISH_SKIP_TOOLS;
   if (envVar !== undefined) {
     return new Set(
       envVar
@@ -162,30 +162,30 @@ export const formatSystemMessage = (
 
   // Neither observations nor summaries
   if (!hasObservations && !hasSummaries) {
-    return "[claude-mem] No previous context for this project";
+    return "[goldfish] No previous context for this project";
   }
 
   // No observations but has summaries
   if (!hasObservations && hasSummaries) {
     const noun = pluralize("summary", summaryCount);
-    return `[claude-mem] ${summaryCount} session ${noun} loaded`;
+    return `[goldfish] ${summaryCount} session ${noun} loaded`;
   }
 
   // Determine source prefix
   let prefix: string;
   switch (source) {
     case "clear":
-      prefix = "[claude-mem] Fresh session \u2014 ";
+      prefix = "[goldfish] Fresh session \u2014 ";
       break;
     case "resume":
-      prefix = "[claude-mem] Resumed \u2014 ";
+      prefix = "[goldfish] Resumed \u2014 ";
       break;
     case "compact":
-      prefix = "[claude-mem] Compacted \u2014 ";
+      prefix = "[goldfish] Compacted \u2014 ";
       break;
     default:
       // "startup" or undefined
-      prefix = "[claude-mem] ";
+      prefix = "[goldfish] ";
       break;
   }
 
@@ -294,7 +294,8 @@ export const processSaveHook = async (
 };
 
 /**
- * Processes UserPromptSubmit hook - stores prompt.
+ * Processes UserPromptSubmit hook - stores prompt and retrieves relevant context.
+ * Runs prompt storage and memory retrieval in parallel.
  */
 export const processNewHook = async (
   deps: HookDeps,
@@ -306,15 +307,51 @@ export const processNewHook = async (
   }
 
   const cleanedPrompt = cleanPrompt(input.prompt);
+  const project = extractProject(input.cwd);
 
-  // Fire-and-forget
-  await fromPromise(
-    postToWorker(deps, "/prompt", {
-      claudeSessionId: input.session_id,
-      prompt: cleanedPrompt,
-      cwd: input.cwd,
-    }),
-  );
+  // Run storage and retrieval in parallel
+  const [, retrieveResult] = await Promise.all([
+    // Fire-and-forget: store the prompt
+    fromPromise(
+      postToWorker(deps, "/prompt", {
+        claudeSessionId: input.session_id,
+        prompt: cleanedPrompt,
+        cwd: input.cwd,
+      }),
+    ),
+    // Synchronous: retrieve relevant memories
+    project
+      ? fromPromise(
+          postToWorker(deps, "/retrieve", {
+            prompt: cleanedPrompt,
+            project,
+            limit: 20,
+          }),
+        )
+      : Promise.resolve({ ok: false as const, error: new Error("no project") }),
+  ]);
+
+  // If retrieval succeeded and has context, return it
+  if (retrieveResult.ok) {
+    const result = retrieveResult.value as {
+      context?: string | null;
+      observationCount?: number;
+      typeCounts?: Record<string, number>;
+    };
+
+    if (
+      result.context &&
+      result.observationCount &&
+      result.observationCount > 0
+    ) {
+      const systemMessage = `[goldfish] ${result.observationCount} relevant memories found for this prompt`;
+      return createContextOutput(
+        result.context,
+        systemMessage,
+        "UserPromptSubmit",
+      );
+    }
+  }
 
   return createSuccessOutput();
 };

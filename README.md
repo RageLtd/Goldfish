@@ -1,13 +1,13 @@
-# claude-mem-bun
+# Goldfish
 
-Persistent memory system for Claude Code - context compression and recall across sessions.
+Claude Code plugin for persistent agent memory — because your AI shouldn't have the memory of a goldfish.
 
 ## Overview
 
-Claude-mem captures tool executions via Claude Code lifecycle hooks, processes them through Claude AI to extract semantic meaning, and stores structured observations in SQLite with full-text search. Relevant context is automatically injected back into new sessions.
+Goldfish captures tool executions via Claude Code lifecycle hooks, processes them through local LLMs (llama.cpp) to extract semantic meaning, and stores structured observations in SQLite with full-text search. Relevant context is automatically injected back into new sessions.
 
 ```
-Claude Code ──► Hooks ──► Worker Service ──► SDK Agent ──► Database
+Claude Code ──► Hooks ──► Worker Service ──► Local LLM ──► Database
                               │                              │
                               └──────────────────────────────┘
                                     Context Injection
@@ -19,12 +19,12 @@ Claude Code ──► Hooks ──► Worker Service ──► SDK Agent ──�
 
 1. Add the marketplace:
 ```bash
-/plugin marketplace add https://github.com/RageLtd/claude-mem
+/plugin marketplace add https://github.com/RageLtd/Goldfish
 ```
 
 2. Install the plugin:
 ```bash
-/plugin install claude-mem-bun@rageltd
+/plugin install goldfish@rageltd
 ```
 
 3. Restart Claude Code
@@ -45,7 +45,7 @@ On first session start, the plugin automatically downloads the correct binary fo
 │   ├── marketplace.json      # Marketplace manifest
 │   └── plugin.json           # Plugin manifest
 ├── bin/
-│   └── claude-mem            # Binary (downloaded at runtime)
+│   └── goldfish              # Binary (downloaded at runtime)
 ├── commands/
 │   └── memory/
 │       └── context.md        # Memory context command
@@ -101,13 +101,13 @@ Then restart Claude Code to pick up the changes.
 ### CLI Commands
 
 ```bash
-./bin/claude-mem hook:context   # SessionStart - inject context
-./bin/claude-mem hook:new       # UserPromptSubmit - create session
-./bin/claude-mem hook:save      # PostToolUse - save observations
-./bin/claude-mem hook:summary   # Stop - generate summary
-./bin/claude-mem hook:cleanup   # SessionEnd - cleanup
-./bin/claude-mem worker         # Start HTTP worker service
-./bin/claude-mem version        # Show version
+./bin/goldfish hook:context   # SessionStart - inject context
+./bin/goldfish hook:new       # UserPromptSubmit - create session
+./bin/goldfish hook:save      # PostToolUse - save observations
+./bin/goldfish hook:summary   # Stop - generate summary
+./bin/goldfish hook:cleanup   # SessionEnd - cleanup
+./bin/goldfish worker         # Start HTTP worker service
+./bin/goldfish version        # Show version
 ```
 
 ### Worker Service
@@ -115,7 +115,7 @@ Then restart Claude Code to pick up the changes.
 The worker service starts automatically when hooks are invoked. To run manually:
 
 ```bash
-./bin/claude-mem worker
+./bin/goldfish worker
 # or
 bun run worker:start
 ```
@@ -155,12 +155,11 @@ bun run release:dry
 ### Release Binaries
 
 Each release includes pre-built binaries:
-- `claude-mem-darwin-arm64` - macOS Apple Silicon
-- `claude-mem-linux-x64` - Linux x64
+- `goldfish-darwin-arm64` - macOS Apple Silicon
+- `goldfish-linux-x64` - Linux x64
 
 ## Requirements
 
 - **Runtime:** Bun
 - **Database:** SQLite with FTS5 (built-in)
 - **Claude Code:** For hook integration
-

@@ -1,23 +1,5 @@
-# Biome (CRITICAL)
+# Biome
 
-Always run Biome against supported file types when finishing work.
+Run `bunx biome check --write .` before finishing work. This formats and lints in one pass.
 
-## Supported File Types
-
-JavaScript, TypeScript, JSX, TSX, JSON, CSS, and GraphQL.
-
-## Commands
-
-```
-biome check --write .
-```
-
-This runs both formatting and linting with auto-fix in a single pass.
-
-## Installation
-
-If Biome is not already a project dev-dependency, suggest installing it:
-
-```
-bun add --dev @biomejs/biome
-```
+Config (`biome.json`): 2-space indent, double quotes, recommended lint rules, auto-organize imports. The `.claude` directory is excluded.

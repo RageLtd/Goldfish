@@ -1,15 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import {
+  parseSearchToolCall,
   parseSummaryToolCall,
   parseToolCall,
 } from "../../src/models/tool-call-parser";
 
 describe("parseToolCall", () => {
   it("parses a valid tool call with all fields", () => {
-    const input = `Let me analyze this.
-<tool_call>
-{"name": "create_observation", "arguments": {"type": "bugfix", "title": "Fixed async token bug", "subtitle": "Added missing await", "narrative": "The getToken call was missing await", "facts": ["getToken is async"], "concepts": ["problem-solution"]}}
-</tool_call>`;
+    const input = `{"name": "create_observation", "arguments": {"type": "bugfix", "title": "Fixed async token bug", "subtitle": "Added missing await", "narrative": "The getToken call was missing await", "facts": ["getToken is async"], "concepts": ["problem-solution"]}}`;
 
     const result = parseToolCall(input);
     expect(result).not.toBeNull();
@@ -24,9 +22,7 @@ describe("parseToolCall", () => {
   });
 
   it("parses minimal required fields", () => {
-    const input = `<tool_call>
-{"name": "create_observation", "arguments": {"type": "discovery", "title": "Found config pattern", "narrative": "The config uses a factory function"}}
-</tool_call>`;
+    const input = `{"name": "create_observation", "arguments": {"type": "discovery", "title": "Found config pattern", "narrative": "The config uses a factory function"}}`;
 
     const result = parseToolCall(input);
     expect(result).not.toBeNull();
@@ -41,21 +37,15 @@ describe("parseToolCall", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null for malformed JSON inside tool_call tags", () => {
-    const input = `<tool_call>
-{not valid json}
-</tool_call>`;
+  it("returns null for malformed JSON", () => {
+    const input = "{not valid json}";
     const result = parseToolCall(input);
     expect(result).toBeNull();
   });
 
-  it("handles thinking tags before tool call", () => {
-    const input = `<think>
-This is a significant bug fix that should be recorded.
-</think>
-<tool_call>
-{"name": "create_observation", "arguments": {"type": "bugfix", "title": "Fixed race condition", "narrative": "Concurrent requests caused data corruption"}}
-</tool_call>`;
+  it("extracts tool call from text with surrounding content", () => {
+    const input = `Let me analyze this.
+{"name": "create_observation", "arguments": {"type": "bugfix", "title": "Fixed race condition", "narrative": "Concurrent requests caused data corruption"}}`;
 
     const result = parseToolCall(input);
     expect(result).not.toBeNull();
@@ -63,9 +53,7 @@ This is a significant bug fix that should be recorded.
   });
 
   it("validates observation type is a known enum value", () => {
-    const input = `<tool_call>
-{"name": "create_observation", "arguments": {"type": "invalid_type", "title": "Test", "narrative": "Test"}}
-</tool_call>`;
+    const input = `{"name": "create_observation", "arguments": {"type": "invalid_type", "title": "Test", "narrative": "Test"}}`;
 
     const result = parseToolCall(input);
     expect(result).not.toBeNull();
@@ -75,9 +63,7 @@ This is a significant bug fix that should be recorded.
 
 describe("parseSummaryToolCall", () => {
   it("parses a valid summary tool call with all fields", () => {
-    const input = `<tool_call>
-{"name": "create_summary", "arguments": {"request": "Fix auth bug", "investigated": "Token refresh flow", "learned": "PKCE is required", "completed": "Fixed token refresh", "nextSteps": "Add refresh rotation", "notes": "Affects all OAuth flows"}}
-</tool_call>`;
+    const input = `{"name": "create_summary", "arguments": {"request": "Fix auth bug", "investigated": "Token refresh flow", "learned": "PKCE is required", "completed": "Fixed token refresh", "nextSteps": "Add refresh rotation", "notes": "Affects all OAuth flows"}}`;
 
     const result = parseSummaryToolCall(input);
     expect(result).not.toBeNull();
@@ -91,9 +77,7 @@ describe("parseSummaryToolCall", () => {
   });
 
   it("parses partial fields (all optional)", () => {
-    const input = `<tool_call>
-{"name": "create_summary", "arguments": {"request": "Add tests", "completed": "Added unit tests"}}
-</tool_call>`;
+    const input = `{"name": "create_summary", "arguments": {"request": "Add tests", "completed": "Added unit tests"}}`;
 
     const result = parseSummaryToolCall(input);
     expect(result).not.toBeNull();
@@ -111,31 +95,88 @@ describe("parseSummaryToolCall", () => {
   });
 
   it("returns null when tool name is not create_summary", () => {
-    const input = `<tool_call>
-{"name": "create_observation", "arguments": {"type": "feature", "title": "Test", "narrative": "Test"}}
-</tool_call>`;
+    const input = `{"name": "create_observation", "arguments": {"type": "feature", "title": "Test", "narrative": "Test"}}`;
 
     const result = parseSummaryToolCall(input);
     expect(result).toBeNull();
   });
 
   it("returns null for malformed JSON", () => {
-    const input = `<tool_call>
-{not valid}
-</tool_call>`;
+    const input = "{not valid}";
     const result = parseSummaryToolCall(input);
     expect(result).toBeNull();
   });
 
   it("ignores non-string argument values", () => {
-    const input = `<tool_call>
-{"name": "create_summary", "arguments": {"request": "Fix bug", "completed": 42, "learned": true}}
-</tool_call>`;
+    const input = `{"name": "create_summary", "arguments": {"request": "Fix bug", "completed": 42, "learned": true}}`;
 
     const result = parseSummaryToolCall(input);
     expect(result).not.toBeNull();
     expect(result?.arguments.request).toBe("Fix bug");
     expect(result?.arguments.completed).toBeUndefined();
     expect(result?.arguments.learned).toBeUndefined();
+  });
+});
+
+describe("parseSearchToolCall", () => {
+  it("parses a valid search_memory tool call", () => {
+    const input = `{"name": "search_memory", "arguments": {"query": "authentication bug fix"}}`;
+
+    const result = parseSearchToolCall(input);
+    expect(result).not.toBeNull();
+    expect(result?.name).toBe("search_memory");
+    expect(result?.arguments.query).toBe("authentication bug fix");
+  });
+
+  it("trims whitespace from query", () => {
+    const input = `{"name": "search_memory", "arguments": {"query": "  database refactor  "}}`;
+
+    const result = parseSearchToolCall(input);
+    expect(result).not.toBeNull();
+    expect(result?.arguments.query).toBe("database refactor");
+  });
+
+  it("returns null when no tool call present", () => {
+    const result = parseSearchToolCall(
+      "This prompt is just a greeting, no search needed.",
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns null when tool name is not search_memory", () => {
+    const input = `{"name": "create_observation", "arguments": {"type": "feature", "title": "Test", "narrative": "Test"}}`;
+
+    const result = parseSearchToolCall(input);
+    expect(result).toBeNull();
+  });
+
+  it("returns null when query is empty string", () => {
+    const input = `{"name": "search_memory", "arguments": {"query": ""}}`;
+
+    const result = parseSearchToolCall(input);
+    expect(result).toBeNull();
+  });
+
+  it("returns null when query is only whitespace", () => {
+    const input = `{"name": "search_memory", "arguments": {"query": "   "}}`;
+
+    const result = parseSearchToolCall(input);
+    expect(result).toBeNull();
+  });
+
+  it("returns null when query is not a string", () => {
+    const input = `{"name": "search_memory", "arguments": {"query": 42}}`;
+
+    const result = parseSearchToolCall(input);
+    expect(result).toBeNull();
+  });
+
+  it("extracts tool call from text with surrounding content", () => {
+    const input = `The user wants to know about error handling patterns.
+{"name": "search_memory", "arguments": {"query": "error handling patterns"}}`;
+
+    const result = parseSearchToolCall(input);
+    expect(result).not.toBeNull();
+    expect(result?.arguments.query).toBe("error handling patterns");
   });
 });
