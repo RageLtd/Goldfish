@@ -374,7 +374,19 @@ describe("hook logic", () => {
   });
 
   describe("processNewHook (UserPromptSubmit)", () => {
-    it("strips private tags from prompt before storage", async () => {
+    it("strips private tags from prompt before retrieval", async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              context: null,
+              observationCount: 0,
+              typeCounts: {},
+            }),
+        }),
+      );
+
       const input: UserPromptSubmitInput = {
         session_id: "session-123",
         cwd: "/projects/test",
@@ -385,7 +397,7 @@ describe("hook logic", () => {
 
       expect(result.continue).toBe(true);
 
-      // Check the stored prompt has private content stripped
+      // Check the retrieve call has private content stripped
       if (mockFetch.mock.calls.length > 0) {
         const [, options] = mockFetch.mock.calls[0] as [string, RequestInit];
         const body = JSON.parse(options.body as string);
@@ -407,24 +419,18 @@ describe("hook logic", () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it("calls /retrieve alongside /prompt", async () => {
-      mockFetch.mockImplementation((url: string) => {
-        if (url.includes("/retrieve")) {
-          return Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                context: "# relevant memories",
-                observationCount: 3,
-                typeCounts: { feature: 2, bugfix: 1 },
-              }),
-          });
-        }
-        return Promise.resolve({
+    it("calls /retrieve for substantive prompts", async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ status: "stored" }),
-        });
-      });
+          json: () =>
+            Promise.resolve({
+              context: "# relevant memories",
+              observationCount: 3,
+              typeCounts: { feature: 2, bugfix: 1 },
+            }),
+        }),
+      );
 
       const input: UserPromptSubmitInput = {
         session_id: "session-123",
@@ -435,11 +441,9 @@ describe("hook logic", () => {
       const result = await processNewHook(deps, input);
 
       expect(result.continue).toBe(true);
-      // Should have called both /prompt and /retrieve
       const urls = mockFetch.mock.calls.map(
         (call: unknown[]) => call[0] as string,
       );
-      expect(urls.some((u: string) => u.includes("/prompt"))).toBe(true);
       expect(urls.some((u: string) => u.includes("/retrieve"))).toBe(true);
     });
 
@@ -532,6 +536,90 @@ describe("hook logic", () => {
       // Should not crash, just return success without context
       expect(result.continue).toBe(true);
       expect(result.suppressOutput).toBe(true);
+    });
+
+    it("skips all network calls for low-signal prompts", async () => {
+      const input: UserPromptSubmitInput = {
+        session_id: "session-123",
+        cwd: "/projects/test",
+        prompt: "sounds good",
+      };
+
+      const result = await processNewHook(deps, input);
+
+      expect(result.continue).toBe(true);
+      expect(result.suppressOutput).toBe(true);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("skips all network calls for 'yes' with punctuation", async () => {
+      const input: UserPromptSubmitInput = {
+        session_id: "session-123",
+        cwd: "/projects/test",
+        prompt: "Yes!",
+      };
+
+      const result = await processNewHook(deps, input);
+
+      expect(result.continue).toBe(true);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("retrieves for substantive short prompts", async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              context: null,
+              observationCount: 0,
+              typeCounts: {},
+            }),
+        }),
+      );
+
+      const input: UserPromptSubmitInput = {
+        session_id: "session-123",
+        cwd: "/projects/test",
+        prompt: "fix the bug",
+      };
+
+      await processNewHook(deps, input);
+
+      const urls = mockFetch.mock.calls.map(
+        (call: unknown[]) => call[0] as string,
+      );
+      expect(urls.some((u: string) => u.includes("/retrieve"))).toBe(true);
+    });
+
+    it("passes session_id to /retrieve for first-prompt detection", async () => {
+      mockFetch.mockImplementation(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              context: null,
+              observationCount: 0,
+              typeCounts: {},
+            }),
+        }),
+      );
+
+      const input: UserPromptSubmitInput = {
+        session_id: "session-456",
+        cwd: "/projects/test",
+        prompt: "refactor the database layer",
+      };
+
+      await processNewHook(deps, input);
+
+      const retrieveCall = mockFetch.mock.calls.find((call: unknown[]) =>
+        (call[0] as string).includes("/retrieve"),
+      );
+      expect(retrieveCall).toBeDefined();
+      const options = (retrieveCall as unknown[])[1] as RequestInit;
+      const body = JSON.parse(options.body as string);
+      expect(body.sessionId).toBe("session-456");
     });
 
     it("skips retrieval and storage for entirely private prompts", async () => {

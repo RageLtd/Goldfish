@@ -153,3 +153,22 @@ export const escapeFts5Query = (query: string): string => {
   // Escape internal double quotes and wrap in quotes for phrase search
   return `"${query.replace(/"/g, '""')}"`;
 };
+
+/**
+ * Escapes a query for FTS5 using OR-based word matching.
+ * Each word is quoted individually and joined with OR, so any matching
+ * word contributes to ranking. Use this for retrieval where recall matters
+ * more than exact phrase matching.
+ */
+export const escapeFts5QueryOr = (query: string): string => {
+  if (!query || typeof query !== "string") {
+    return '""';
+  }
+  const words = query
+    .split(/\s+/)
+    .map((w) => w.replace(/"/g, "").trim())
+    .filter((w) => w.length > 0);
+  if (words.length === 0) return '""';
+  if (words.length === 1) return `"${words[0]}"`;
+  return words.map((w) => `"${w}"`).join(" OR ");
+};

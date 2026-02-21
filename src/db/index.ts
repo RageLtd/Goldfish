@@ -396,44 +396,6 @@ export const getRecentSummaries = (
 };
 
 // ============================================================================
-// User Prompt Operations
-// ============================================================================
-
-interface SaveUserPromptInput {
-  readonly claudeSessionId: string;
-  readonly promptNumber: number;
-  readonly promptText: string;
-}
-
-/**
- * Saves a user prompt.
- */
-export const saveUserPrompt = (
-  db: Database,
-  input: SaveUserPromptInput,
-): Result<number> => {
-  const { claudeSessionId, promptNumber, promptText } = input;
-  const now = new Date();
-
-  return fromTry(() => {
-    const result = db.run(
-      `INSERT INTO user_prompts
-       (claude_session_id, prompt_number, prompt_text, created_at, created_at_epoch)
-       VALUES (?, ?, ?, ?, ?)`,
-      [
-        claudeSessionId,
-        promptNumber,
-        promptText,
-        now.toISOString(),
-        now.getTime(),
-      ],
-    );
-
-    return Number(result.lastInsertRowid);
-  });
-};
-
-// ============================================================================
 // Search Operations
 // ============================================================================
 

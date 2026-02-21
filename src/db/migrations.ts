@@ -252,4 +252,16 @@ export const migrations: readonly Migration[] = [
       db.run("ALTER TABLE observations ADD COLUMN embedding BLOB");
     },
   },
+  {
+    version: 7,
+    description: "Drop unused user_prompts table",
+    up: (db) => {
+      db.run("DROP TRIGGER IF EXISTS user_prompts_ai");
+      db.run("DROP TRIGGER IF EXISTS user_prompts_ad");
+      db.run("DROP TABLE IF EXISTS user_prompts_fts");
+      db.run("DROP INDEX IF EXISTS idx_user_prompts_claude_session");
+      db.run("DROP INDEX IF EXISTS idx_user_prompts_created");
+      db.run("DROP TABLE IF EXISTS user_prompts");
+    },
+  },
 ];

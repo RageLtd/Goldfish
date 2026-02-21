@@ -23,9 +23,10 @@ import {
   handleGetTimeline,
   handleHealth,
   handleQueueObservation,
-  handleQueuePrompt,
   handleQueueSummary,
+  handleRetrieve,
   handleSearch,
+  RETRIEVE_SAME_PROJECT_BONUS,
   type WorkerDeps,
 } from "../../src/worker/handlers";
 
@@ -267,57 +268,6 @@ describe("worker handlers", () => {
         bugfix: 2,
         feature: 1,
       });
-    });
-  });
-
-  describe("handleQueuePrompt", () => {
-    it("stores prompt for new session", async () => {
-      const result = await handleQueuePrompt(deps, {
-        claudeSessionId: "claude-new",
-        prompt: "Help me fix the bug",
-        cwd: "/projects/my-app",
-      });
-
-      expect(result.status).toBe(200);
-      expect(result.body.status).toBe("stored");
-      expect(result.body.promptNumber).toBe(1);
-    });
-
-    it("increments prompt counter for existing session", async () => {
-      createSession(db, {
-        claudeSessionId: "claude-123",
-        project: "test-project",
-        userPrompt: "Initial prompt",
-      });
-
-      const result = await handleQueuePrompt(deps, {
-        claudeSessionId: "claude-123",
-        prompt: "Follow up prompt",
-        cwd: "/projects/test-project",
-      });
-
-      expect(result.status).toBe(200);
-      expect(result.body.promptNumber).toBeGreaterThan(1);
-    });
-
-    it("returns 400 for missing prompt", async () => {
-      const result = await handleQueuePrompt(deps, {
-        claudeSessionId: "claude-123",
-        prompt: "",
-        cwd: "/projects",
-      });
-
-      expect(result.status).toBe(400);
-    });
-
-    it("returns 400 for missing claudeSessionId", async () => {
-      const result = await handleQueuePrompt(deps, {
-        claudeSessionId: "",
-        prompt: "test",
-        cwd: "/projects",
-      });
-
-      expect(result.status).toBe(400);
     });
   });
 
@@ -768,5 +718,78 @@ describe("handleSearch — embedding re-ranking", () => {
 
     expect(result.status).toBe(200);
     expect(result.body.count).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("handleRetrieve", () => {
+  let db: Database;
+
+  beforeEach(() => {
+    db = createDatabase(":memory:");
+    runMigrations(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("skips retrieval when sessionId has no existing session", async () => {
+    const result = await handleRetrieve(
+      { db },
+      {
+        prompt: "fix the auth bug",
+        project: "test-project",
+        limit: 20,
+        sessionId: "nonexistent-session",
+      },
+    );
+
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({
+      context: null,
+      observationCount: 0,
+      typeCounts: {},
+    });
+  });
+
+  it("proceeds with retrieval when session exists", async () => {
+    createSession(db, {
+      claudeSessionId: "claude-existing",
+      project: "test-project",
+      userPrompt: "Initial",
+    });
+
+    // Without a model manager, retrieval returns 503
+    const result = await handleRetrieve(
+      { db },
+      {
+        prompt: "fix the auth bug",
+        project: "test-project",
+        limit: 20,
+        sessionId: "claude-existing",
+      },
+    );
+
+    // Should NOT short-circuit — proceeds to model check and returns 503
+    expect(result.status).toBe(503);
+  });
+
+  it("proceeds with retrieval when no sessionId provided", async () => {
+    const result = await handleRetrieve(
+      { db },
+      {
+        prompt: "fix the auth bug",
+        project: "test-project",
+        limit: 20,
+      },
+    );
+
+    // Without model manager, returns 503 (didn't short-circuit)
+    expect(result.status).toBe(503);
+  });
+
+  it("exports RETRIEVE_SAME_PROJECT_BONUS as a positive number", () => {
+    expect(RETRIEVE_SAME_PROJECT_BONUS).toBeGreaterThan(0);
+    expect(RETRIEVE_SAME_PROJECT_BONUS).toBeLessThan(1);
   });
 });

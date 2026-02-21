@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   DEFAULT_LIMIT,
   escapeFts5Query,
+  escapeFts5QueryOr,
   MAX_LIMIT,
   MIN_LIMIT,
   projectFromCwd,
@@ -125,6 +126,39 @@ describe("escapeFts5Query", () => {
     );
     expect(escapeFts5Query("file-name_v2.test.ts")).toBe(
       '"file-name_v2.test.ts"',
+    );
+  });
+});
+
+describe("escapeFts5QueryOr", () => {
+  it("returns empty quotes for empty/null input", () => {
+    expect(escapeFts5QueryOr("")).toBe('""');
+    expect(escapeFts5QueryOr(null as unknown as string)).toBe('""');
+  });
+
+  it("quotes single word", () => {
+    expect(escapeFts5QueryOr("authentication")).toBe('"authentication"');
+  });
+
+  it("joins multiple words with OR", () => {
+    expect(escapeFts5QueryOr("hook logic prompt")).toBe(
+      '"hook" OR "logic" OR "prompt"',
+    );
+  });
+
+  it("handles extra whitespace", () => {
+    expect(escapeFts5QueryOr("  fix   the   bug  ")).toBe(
+      '"fix" OR "the" OR "bug"',
+    );
+  });
+
+  it("strips double quotes from words", () => {
+    expect(escapeFts5QueryOr('"quoted" word')).toBe('"quoted" OR "word"');
+  });
+
+  it("handles two words", () => {
+    expect(escapeFts5QueryOr("database migration")).toBe(
+      '"database" OR "migration"',
     );
   });
 });

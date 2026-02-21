@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   cleanPrompt,
   isEntirelyPrivate,
+  isLowSignalPrompt,
   stripAllMemoryTags,
   stripContextTags,
   stripPrivateTags,
@@ -114,6 +115,134 @@ describe("isEntirelyPrivate", () => {
 
   it("returns true for whitespace only", () => {
     expect(isEntirelyPrivate("   ")).toBe(true);
+  });
+});
+
+describe("isLowSignalPrompt", () => {
+  // Affirmations and simple confirmations — should be low-signal
+  it("detects 'yes' as low-signal", () => {
+    expect(isLowSignalPrompt("yes")).toBe(true);
+  });
+
+  it("detects 'okay' as low-signal", () => {
+    expect(isLowSignalPrompt("okay")).toBe(true);
+  });
+
+  it("detects 'ok' as low-signal", () => {
+    expect(isLowSignalPrompt("ok")).toBe(true);
+  });
+
+  it("detects 'sure' as low-signal", () => {
+    expect(isLowSignalPrompt("sure")).toBe(true);
+  });
+
+  it("detects 'go ahead' as low-signal", () => {
+    expect(isLowSignalPrompt("go ahead")).toBe(true);
+  });
+
+  it("detects 'let's do it' as low-signal", () => {
+    expect(isLowSignalPrompt("let's do it")).toBe(true);
+  });
+
+  it("detects 'sounds good' as low-signal", () => {
+    expect(isLowSignalPrompt("sounds good")).toBe(true);
+  });
+
+  it("detects 'lgtm' as low-signal", () => {
+    expect(isLowSignalPrompt("lgtm")).toBe(true);
+  });
+
+  it("detects 'thanks' as low-signal", () => {
+    expect(isLowSignalPrompt("thanks")).toBe(true);
+  });
+
+  it("detects 'thank you' as low-signal", () => {
+    expect(isLowSignalPrompt("thank you")).toBe(true);
+  });
+
+  it("detects 'proceed' as low-signal", () => {
+    expect(isLowSignalPrompt("proceed")).toBe(true);
+  });
+
+  it("detects 'continue' as low-signal", () => {
+    expect(isLowSignalPrompt("continue")).toBe(true);
+  });
+
+  it("detects 'do it' as low-signal", () => {
+    expect(isLowSignalPrompt("do it")).toBe(true);
+  });
+
+  it("detects 'agreed' as low-signal", () => {
+    expect(isLowSignalPrompt("agreed")).toBe(true);
+  });
+
+  it("detects 'correct' as low-signal", () => {
+    expect(isLowSignalPrompt("correct")).toBe(true);
+  });
+
+  it("detects 'nope' as low-signal", () => {
+    expect(isLowSignalPrompt("nope")).toBe(true);
+  });
+
+  // Case and punctuation insensitive
+  it("is case-insensitive", () => {
+    expect(isLowSignalPrompt("YES")).toBe(true);
+    expect(isLowSignalPrompt("Sounds Good")).toBe(true);
+  });
+
+  it("ignores trailing punctuation", () => {
+    expect(isLowSignalPrompt("yes!")).toBe(true);
+    expect(isLowSignalPrompt("okay.")).toBe(true);
+    expect(isLowSignalPrompt("sure!!")).toBe(true);
+    expect(isLowSignalPrompt("lgtm!")).toBe(true);
+  });
+
+  it("ignores leading/trailing whitespace", () => {
+    expect(isLowSignalPrompt("  yes  ")).toBe(true);
+    expect(isLowSignalPrompt("\n ok \n")).toBe(true);
+  });
+
+  // Project-relevant prompts — should NOT be low-signal
+  it("does not flag 'fix the bug' as low-signal", () => {
+    expect(isLowSignalPrompt("fix the bug")).toBe(false);
+  });
+
+  it("does not flag 'refactor auth' as low-signal", () => {
+    expect(isLowSignalPrompt("refactor auth")).toBe(false);
+  });
+
+  it("does not flag prompts with file paths as low-signal", () => {
+    expect(isLowSignalPrompt("look at src/hooks/logic.ts")).toBe(false);
+  });
+
+  it("does not flag prompts with backticks as low-signal", () => {
+    expect(isLowSignalPrompt("update the `processNewHook` function")).toBe(
+      false,
+    );
+  });
+
+  it("does not flag prompts with camelCase tokens as low-signal", () => {
+    expect(isLowSignalPrompt("fix processNewHook")).toBe(false);
+  });
+
+  it("does not flag prompts with snake_case tokens as low-signal", () => {
+    expect(isLowSignalPrompt("update user_prompt table")).toBe(false);
+  });
+
+  it("does not flag multi-sentence prompts as low-signal", () => {
+    expect(
+      isLowSignalPrompt("Yes, and also add error handling to the parser"),
+    ).toBe(false);
+  });
+
+  it("flags slash commands as low-signal", () => {
+    expect(isLowSignalPrompt("/commit")).toBe(true);
+    expect(isLowSignalPrompt("/review-pr")).toBe(true);
+    expect(isLowSignalPrompt("/status")).toBe(true);
+  });
+
+  it("does not flag empty string (already handled by isEntirelyPrivate)", () => {
+    expect(isLowSignalPrompt("")).toBe(false);
   });
 });
 
