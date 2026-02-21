@@ -8,6 +8,8 @@ import { sanitizeLimit, sanitizeProject } from "../utils/validation";
 import {
   type CompleteSessionInput,
   type ContextFormat,
+  handleBackfill,
+  handleBackfillStatus,
   handleCompleteSession,
   handleFindByFile,
   handleGetContext,
@@ -270,6 +272,22 @@ const handleFindByFileRoute = async (
   return jsonResponse(result.status, result.body);
 };
 
+const handleBackfillRoute = async (
+  deps: WorkerDeps,
+  _request: Request,
+): Promise<Response> => {
+  const result = await handleBackfill(deps);
+  return jsonResponse(result.status, result.body);
+};
+
+const handleBackfillStatusRoute = async (
+  deps: WorkerDeps,
+  _request: Request,
+): Promise<Response> => {
+  const result = await handleBackfillStatus(deps);
+  return jsonResponse(result.status, result.body);
+};
+
 const handleObservationByIdRoute = async (
   deps: WorkerDeps,
   request: Request,
@@ -305,6 +323,12 @@ const routes: readonly Route[] = [
     method: "GET",
     path: "/observation_by_id",
     handler: handleObservationByIdRoute,
+  },
+  { method: "POST", path: "/backfill", handler: handleBackfillRoute },
+  {
+    method: "GET",
+    path: "/backfill/status",
+    handler: handleBackfillStatusRoute,
   },
 ];
 

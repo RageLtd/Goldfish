@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   parseSearchToolCall,
+  parseSmartSearchToolCall,
   parseSummaryToolCall,
   parseToolCall,
 } from "../../src/models/tool-call-parser";
@@ -178,5 +179,67 @@ describe("parseSearchToolCall", () => {
     const result = parseSearchToolCall(input);
     expect(result).not.toBeNull();
     expect(result?.arguments.query).toBe("error handling patterns");
+  });
+});
+
+describe("parseSmartSearchToolCall", () => {
+  it("parses search_memory_fts as fts mode", () => {
+    const input = `{"name": "search_memory_fts", "arguments": {"query": "auth token refresh"}}`;
+    const result = parseSmartSearchToolCall(input);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("fts");
+    expect(result?.query).toBe("auth token refresh");
+  });
+
+  it("parses search_memory_semantic as semantic mode", () => {
+    const input = `{"name": "search_memory_semantic", "arguments": {"query": "how does authentication work"}}`;
+    const result = parseSmartSearchToolCall(input);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("semantic");
+    expect(result?.query).toBe("how does authentication work");
+  });
+
+  it("parses legacy search_memory as fts mode", () => {
+    const input = `{"name": "search_memory", "arguments": {"query": "database schema"}}`;
+    const result = parseSmartSearchToolCall(input);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("fts");
+    expect(result?.query).toBe("database schema");
+  });
+
+  it("returns null for empty query", () => {
+    const input = `{"name": "search_memory_fts", "arguments": {"query": ""}}`;
+    expect(parseSmartSearchToolCall(input)).toBeNull();
+  });
+
+  it("returns null for whitespace-only query", () => {
+    const input = `{"name": "search_memory_semantic", "arguments": {"query": "   "}}`;
+    expect(parseSmartSearchToolCall(input)).toBeNull();
+  });
+
+  it("returns null when no tool call present", () => {
+    expect(
+      parseSmartSearchToolCall("No tool call here, just plain text."),
+    ).toBeNull();
+  });
+
+  it("returns null for unrecognized tool names", () => {
+    const input = `{"name": "create_observation", "arguments": {"query": "test"}}`;
+    expect(parseSmartSearchToolCall(input)).toBeNull();
+  });
+
+  it("trims whitespace from query", () => {
+    const input = `{"name": "search_memory_semantic", "arguments": {"query": "  how does auth work  "}}`;
+    const result = parseSmartSearchToolCall(input);
+    expect(result?.query).toBe("how does auth work");
+  });
+
+  it("extracts from text with surrounding content", () => {
+    const input = `I should search semantically for this.
+{"name": "search_memory_semantic", "arguments": {"query": "error handling patterns"}}`;
+    const result = parseSmartSearchToolCall(input);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("semantic");
+    expect(result?.query).toBe("error handling patterns");
   });
 });

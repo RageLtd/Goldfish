@@ -244,6 +244,55 @@ describe("isLowSignalPrompt", () => {
   it("does not flag empty string (already handled by isEntirelyPrivate)", () => {
     expect(isLowSignalPrompt("")).toBe(false);
   });
+
+  // New patterns — single-char, filler, short questions, acknowledgments, navigation
+  it("detects single-char responses as low-signal", () => {
+    expect(isLowSignalPrompt("y")).toBe(true);
+    expect(isLowSignalPrompt("n")).toBe(true);
+    expect(isLowSignalPrompt("k")).toBe(true);
+  });
+
+  it("detects filler words as low-signal", () => {
+    expect(isLowSignalPrompt("hmm")).toBe(true);
+    expect(isLowSignalPrompt("hm")).toBe(true);
+    expect(isLowSignalPrompt("ah")).toBe(true);
+    expect(isLowSignalPrompt("oh")).toBe(true);
+    expect(isLowSignalPrompt("mhm")).toBe(true);
+  });
+
+  it("detects short questions as low-signal", () => {
+    expect(isLowSignalPrompt("what")).toBe(true);
+    expect(isLowSignalPrompt("why")).toBe(true);
+    expect(isLowSignalPrompt("how")).toBe(true);
+    expect(isLowSignalPrompt("really")).toBe(true);
+  });
+
+  it("detects acknowledgments as low-signal", () => {
+    expect(isLowSignalPrompt("noted")).toBe(true);
+    expect(isLowSignalPrompt("done")).toBe(true);
+    expect(isLowSignalPrompt("fixed")).toBe(true);
+    expect(isLowSignalPrompt("merged")).toBe(true);
+    expect(isLowSignalPrompt("pushed")).toBe(true);
+    expect(isLowSignalPrompt("committed")).toBe(true);
+  });
+
+  it("detects navigation words as low-signal", () => {
+    expect(isLowSignalPrompt("next")).toBe(true);
+    expect(isLowSignalPrompt("back")).toBe(true);
+    expect(isLowSignalPrompt("again")).toBe(true);
+    expect(isLowSignalPrompt("more")).toBe(true);
+  });
+
+  // Short prompt threshold — prompts below GOLDFISH_MIN_PROMPT_WORDS (default 3) are low-signal
+  it("flags short prompts below word threshold as low-signal", () => {
+    expect(isLowSignalPrompt("fix it")).toBe(true); // 2 words < 3
+    expect(isLowSignalPrompt("do that")).toBe(true); // 2 words < 3
+  });
+
+  it("does not flag prompts at or above word threshold", () => {
+    expect(isLowSignalPrompt("fix the bug")).toBe(false); // 3 words >= 3
+    expect(isLowSignalPrompt("add error handling")).toBe(false); // 3 words >= 3
+  });
 });
 
 describe("stripSystemReminders", () => {

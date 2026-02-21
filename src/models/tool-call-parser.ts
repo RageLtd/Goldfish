@@ -216,3 +216,56 @@ export const parseSearchToolCall = (
     },
   };
 };
+
+// ============================================================================
+// Smart Search Tool Call Parser
+// ============================================================================
+
+interface FtsSearchResult {
+  readonly mode: "fts";
+  readonly query: string;
+}
+
+interface SemanticSearchResult {
+  readonly mode: "semantic";
+  readonly query: string;
+}
+
+export type SearchModeResult = FtsSearchResult | SemanticSearchResult;
+
+const SMART_SEARCH_NAMES = new Set([
+  "search_memory_fts",
+  "search_memory_semantic",
+  "search_memory",
+]);
+
+/**
+ * Parses a smart search tool call from model output.
+ * Recognizes search_memory_fts, search_memory_semantic, and legacy search_memory.
+ * Returns null if no tool call or prompt is not searchable.
+ */
+export const parseSmartSearchToolCall = (
+  text: string,
+): SearchModeResult | null => {
+  const extracted = extractToolCallJson(text);
+  if (!extracted || !SMART_SEARCH_NAMES.has(extracted.name)) return null;
+
+  const { name, rawArgs } = extracted;
+
+  if (typeof rawArgs.query !== "string" || rawArgs.query.trim() === "") {
+    return null;
+  }
+
+  const query = rawArgs.query.trim();
+
+  if (name === "search_memory_fts") {
+    return { mode: "fts", query };
+  }
+
+  if (name === "search_memory_semantic") {
+    return { mode: "semantic", query };
+  }
+
+  // Legacy search_memory — treat as FTS for backward compat
+  return { mode: "fts", query };
+};

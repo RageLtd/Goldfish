@@ -12,10 +12,16 @@ import {
 } from "../../src/db/index";
 import type { ModelManager } from "../../src/models/manager";
 import {
+  handleBackfill,
+  handleBackfillStatus,
   handleRetrieve,
   type RetrieveInput,
   type WorkerDeps,
 } from "../../src/worker/handlers";
+import {
+  createMessageRouter,
+  type RouterMessage,
+} from "../../src/worker/message-router";
 
 describe("handleRetrieve", () => {
   let db: Database;
@@ -173,5 +179,158 @@ describe("handleRetrieve", () => {
     const body = result.body as { context: unknown; observationCount: number };
     expect(body.context).toBeNull();
     expect(body.observationCount).toBe(0);
+  });
+});
+
+describe("handleBackfill", () => {
+  let db: Database;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    runMigrations(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("returns enqueued: 0 when no observations lack embeddings", async () => {
+    const enqueued: RouterMessage[] = [];
+    const router = createMessageRouter({
+      processMessage: async () => {},
+    });
+    const originalEnqueue = router.enqueue;
+    router.enqueue = (msg: RouterMessage) => {
+      enqueued.push(msg);
+      originalEnqueue(msg);
+    };
+
+    const result = await handleBackfill({ db, router });
+    expect(result.status).toBe(200);
+    expect((result.body as { enqueued: number }).enqueued).toBe(0);
+  });
+
+  it("enqueues embed messages for observations without embeddings", async () => {
+    createSession(db, {
+      claudeSessionId: "bf-session",
+      project: "test",
+      userPrompt: "test",
+    });
+
+    storeObservation(db, {
+      claudeSessionId: "bf-session",
+      project: "test",
+      promptNumber: 1,
+      discoveryTokens: 100,
+      observation: {
+        type: "discovery",
+        title: "Test observation",
+        subtitle: "sub",
+        narrative: "narrative",
+        facts: [],
+        concepts: [],
+        filesRead: [],
+        filesModified: [],
+      },
+    });
+
+    const enqueued: RouterMessage[] = [];
+    const router = createMessageRouter({
+      processMessage: async () => {},
+    });
+    const deps: WorkerDeps = { db, router };
+
+    // Intercept enqueue calls
+    const origEnqueue = router.enqueue.bind(router);
+    (router as { enqueue: typeof origEnqueue }).enqueue = (
+      msg: RouterMessage,
+    ) => {
+      enqueued.push(msg);
+    };
+
+    const result = await handleBackfill(deps);
+    expect(result.status).toBe(200);
+    expect((result.body as { enqueued: number }).enqueued).toBe(1);
+    expect(enqueued.length).toBe(1);
+    expect(enqueued[0].type).toBe("embed");
+  });
+
+  it("returns enqueued: 0 when router is unavailable", async () => {
+    createSession(db, {
+      claudeSessionId: "bf-session-2",
+      project: "test",
+      userPrompt: "test",
+    });
+
+    storeObservation(db, {
+      claudeSessionId: "bf-session-2",
+      project: "test",
+      promptNumber: 1,
+      discoveryTokens: 100,
+      observation: {
+        type: "discovery",
+        title: "No router obs",
+        subtitle: "sub",
+        narrative: "narrative",
+        facts: [],
+        concepts: [],
+        filesRead: [],
+        filesModified: [],
+      },
+    });
+
+    const result = await handleBackfill({ db });
+    expect(result.status).toBe(200);
+    expect((result.body as { enqueued: number }).enqueued).toBe(0);
+  });
+});
+
+describe("handleBackfillStatus", () => {
+  let db: Database;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    runMigrations(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("returns remaining: 0 when all have embeddings", async () => {
+    const result = await handleBackfillStatus({ db });
+    expect(result.status).toBe(200);
+    const body = result.body as { remaining: number; pendingMessages: number };
+    expect(body.remaining).toBe(0);
+    expect(body.pendingMessages).toBe(0);
+  });
+
+  it("returns correct remaining count", async () => {
+    createSession(db, {
+      claudeSessionId: "status-session",
+      project: "test",
+      userPrompt: "test",
+    });
+
+    storeObservation(db, {
+      claudeSessionId: "status-session",
+      project: "test",
+      promptNumber: 1,
+      discoveryTokens: 100,
+      observation: {
+        type: "discovery",
+        title: "Needs embedding",
+        subtitle: "sub",
+        narrative: "narrative",
+        facts: [],
+        concepts: [],
+        filesRead: [],
+        filesModified: [],
+      },
+    });
+
+    const result = await handleBackfillStatus({ db });
+    expect(result.status).toBe(200);
+    expect((result.body as { remaining: number }).remaining).toBe(1);
   });
 });

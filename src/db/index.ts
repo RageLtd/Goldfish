@@ -664,6 +664,136 @@ export const updateObservationEmbedding = (
 };
 
 // ============================================================================
+// Pruning Operations
+// ============================================================================
+
+/**
+ * Deletes observations by ID list. Returns count of deleted rows.
+ */
+export const deleteObservationsByIds = (
+  db: Database,
+  input: { readonly ids: readonly number[] },
+): Result<number> => {
+  const { ids } = input;
+  if (ids.length === 0) return ok(0);
+
+  return fromTry(() => {
+    const placeholders = ids.map(() => "?").join(",");
+    const result = db.run(
+      `DELETE FROM observations WHERE id IN (${placeholders})`,
+      ids as number[],
+    );
+    return result.changes;
+  });
+};
+
+export interface PruneCandidate {
+  readonly id: number;
+  readonly title: string | null;
+  readonly type: string;
+  readonly project: string;
+  readonly createdAtEpoch: number;
+  readonly hasEmbedding: boolean;
+}
+
+/**
+ * Gets all observations with metadata for pruning decisions.
+ */
+export const getObservationsForPruning = (
+  db: Database,
+): Result<readonly PruneCandidate[]> => {
+  return fromTry(() => {
+    const rows = db
+      .query<
+        {
+          id: number;
+          title: string | null;
+          type: string;
+          project: string;
+          created_at_epoch: number;
+          has_embedding: number;
+        },
+        []
+      >(
+        `SELECT id, title, type, project, created_at_epoch,
+                (embedding IS NOT NULL) AS has_embedding
+         FROM observations
+         ORDER BY created_at_epoch DESC`,
+      )
+      .all();
+
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      type: row.type,
+      project: row.project,
+      createdAtEpoch: row.created_at_epoch,
+      hasEmbedding: row.has_embedding === 1,
+    }));
+  });
+};
+
+/**
+ * Gets observations with their embeddings for semantic comparison.
+ * Returns only observations that have embeddings.
+ */
+export const getObservationsWithEmbeddings = (
+  db: Database,
+  input: { readonly limit: number },
+): Result<
+  readonly {
+    readonly id: number;
+    readonly title: string | null;
+    readonly narrative: string | null;
+    readonly project: string;
+    readonly type: string;
+    readonly createdAtEpoch: number;
+    readonly sdkSessionId: string;
+    readonly embedding: Float32Array;
+  }[]
+> => {
+  return fromTry(() => {
+    const rows = db
+      .query<
+        {
+          id: number;
+          title: string | null;
+          narrative: string | null;
+          project: string;
+          type: string;
+          created_at_epoch: number;
+          sdk_session_id: string;
+          embedding: Buffer;
+        },
+        [number]
+      >(
+        `SELECT id, title, narrative, project, type, created_at_epoch,
+                sdk_session_id, embedding
+         FROM observations
+         WHERE embedding IS NOT NULL
+         ORDER BY created_at_epoch DESC
+         LIMIT ?`,
+      )
+      .all(input.limit);
+
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      narrative: row.narrative,
+      project: row.project,
+      type: row.type,
+      createdAtEpoch: row.created_at_epoch,
+      sdkSessionId: row.sdk_session_id,
+      embedding: new Float32Array(
+        row.embedding.buffer,
+        row.embedding.byteOffset,
+        row.embedding.byteLength / 4,
+      ),
+    }));
+  });
+};
+
+// ============================================================================
 // Deduplication
 // ============================================================================
 
