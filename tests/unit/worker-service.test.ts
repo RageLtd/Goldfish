@@ -134,42 +134,6 @@ describe("worker service router", () => {
     });
   });
 
-  describe("POST /prompt", () => {
-    it("stores prompt for new session", async () => {
-      const request = new Request("http://localhost/prompt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          claudeSessionId: "claude-new",
-          prompt: "Help me fix a bug",
-          cwd: "/projects/my-app",
-        }),
-      });
-
-      const response = await router.handle(request);
-
-      expect(response.status).toBe(200);
-      const body = await response.json();
-      expect(body.status).toBe("stored");
-    });
-
-    it("returns 400 for missing prompt", async () => {
-      const request = new Request("http://localhost/prompt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          claudeSessionId: "claude-123",
-          prompt: "",
-          cwd: "/projects",
-        }),
-      });
-
-      const response = await router.handle(request);
-
-      expect(response.status).toBe(400);
-    });
-  });
-
   describe("POST /complete", () => {
     it("marks session as completed", async () => {
       createSession(db, {

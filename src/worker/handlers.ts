@@ -12,14 +12,14 @@ import {
   getRecentObservations,
   getRecentSummaries,
   getSessionByClaudeId,
-  incrementPromptCounter,
-  saveUserPrompt,
   searchObservations,
   searchSummaries,
 } from "../db/index";
 import type { ModelManager } from "../models/manager";
 import { buildSearchMemoryPrompt, SEARCH_MEMORY_TOOL } from "../models/prompts";
 import { parseSearchToolCall } from "../models/tool-call-parser";
+import type { Observation } from "../types/domain";
+import { fromPromise } from "../types/result";
 import {
   formatContextFull,
   formatContextIndex,
@@ -32,8 +32,35 @@ import {
   scoreObservation,
 } from "../utils/relevance";
 import { parseSince } from "../utils/temporal";
-import { escapeFts5Query, projectFromCwd } from "../utils/validation";
+import {
+  escapeFts5Query,
+  escapeFts5QueryOr,
+  projectFromCwd,
+} from "../utils/validation";
 import type { MessageRouter } from "./message-router";
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/** Weights for FTS position vs embedding cosine similarity in re-ranking. */
+export const FTS_WEIGHT = 0.6;
+export const EMBEDDING_WEIGHT = 0.4;
+
+/**
+ * Minimum combined relevance score (0-1) for retrieval results.
+ * Results below this threshold are filtered out to avoid injecting
+ * weakly-related memories as noise.
+ * Score = FTS_WEIGHT * ftsRank + EMBEDDING_WEIGHT * embeddingSimilarity + sameProjectBonus.
+ */
+export const RETRIEVE_MIN_RELEVANCE = 0.3;
+
+/**
+ * Additive bonus for observations from the same project as the query.
+ * Applied during re-ranking so same-project results float above
+ * equally-relevant cross-project results without excluding them.
+ */
+export const RETRIEVE_SAME_PROJECT_BONUS = 0.15;
 
 // ============================================================================
 // Internal helpers
@@ -66,6 +93,81 @@ const enqueueMissingEmbeddings = (
       });
     }
   }
+};
+
+interface RerankInput {
+  readonly db: Database;
+  readonly modelManager: ModelManager;
+  readonly router?: MessageRouter;
+  readonly observations: readonly Observation[];
+  readonly query: string;
+  readonly project?: string;
+  readonly limit: number;
+}
+
+interface RerankResult {
+  readonly observations: readonly Observation[];
+  readonly reranked: boolean;
+}
+
+/**
+ * Re-ranks observations using embedding similarity combined with FTS position.
+ * Applies same-project bonus and minimum relevance threshold.
+ * Returns Result — callers must handle failure explicitly.
+ */
+const rerankWithEmbeddings = async (
+  input: RerankInput,
+): Promise<RerankResult> => {
+  const { db, modelManager, router, observations, query, project, limit } =
+    input;
+
+  if (observations.length === 0) {
+    return { observations: [], reranked: false };
+  }
+
+  const embeddingResult = await fromPromise(
+    modelManager.computeEmbedding(query),
+  );
+  if (!embeddingResult.ok) {
+    return { observations: observations.slice(0, limit), reranked: false };
+  }
+
+  const queryEmbedding = embeddingResult.value;
+  const ids = observations.map((o) => o.id);
+  const embeddingsResult = getEmbeddingsByIds(db, { ids });
+
+  if (!embeddingsResult.ok) {
+    return { observations: observations.slice(0, limit), reranked: false };
+  }
+
+  const embeddings = embeddingsResult.value;
+
+  const scored = observations.map((obs, index) => {
+    const ftsScore = 1 - index / observations.length;
+    const stored = embeddings.get(obs.id);
+    const embScore = stored ? cosineSimilarity(queryEmbedding, stored) : 0;
+    const projectBonus =
+      project && obs.project === project ? RETRIEVE_SAME_PROJECT_BONUS : 0;
+    return {
+      observation: obs,
+      combined:
+        FTS_WEIGHT * ftsScore + EMBEDDING_WEIGHT * embScore + projectBonus,
+    };
+  });
+
+  scored.sort((a, b) => b.combined - a.combined);
+
+  const ranked = scored
+    .filter((s) => s.combined >= RETRIEVE_MIN_RELEVANCE)
+    .slice(0, limit)
+    .map((s) => s.observation);
+
+  // Enqueue missing embeddings for backfill
+  if (router) {
+    enqueueMissingEmbeddings(router, observations, new Set(embeddings.keys()));
+  }
+
+  return { observations: ranked, reranked: true };
 };
 
 // ============================================================================
@@ -145,16 +247,11 @@ export interface FindByFileInput {
   readonly limit: number;
 }
 
-export interface QueuePromptInput {
-  readonly claudeSessionId: string;
-  readonly prompt: string;
-  readonly cwd: string;
-}
-
 export interface RetrieveInput {
   readonly prompt: string;
   readonly project: string;
   readonly limit: number;
+  readonly sessionId?: string;
 }
 
 // ============================================================================
@@ -254,101 +351,6 @@ export const handleQueueObservation = async (
 };
 
 /**
- * Queue a user prompt for processing.
- */
-export const handleQueuePrompt = async (
-  deps: WorkerDeps,
-  input: QueuePromptInput,
-): Promise<HandlerResponse> => {
-  const { claudeSessionId, prompt, cwd } = input;
-
-  // Validate required fields
-  if (!claudeSessionId || !prompt) {
-    return {
-      status: 400,
-      body: { error: "claudeSessionId and prompt are required" },
-    };
-  }
-
-  // Get or create session
-  const sessionResult = getSessionByClaudeId(deps.db, claudeSessionId);
-  if (!sessionResult.ok) {
-    return {
-      status: 500,
-      body: { error: sessionResult.error.message },
-    };
-  }
-
-  let sessionId: number;
-  let promptNumber: number;
-  const project = projectFromCwd(cwd);
-
-  if (!sessionResult.value) {
-    const createResult = createSession(deps.db, {
-      claudeSessionId,
-      project,
-      userPrompt: prompt,
-    });
-
-    if (!createResult.ok) {
-      return {
-        status: 500,
-        body: { error: createResult.error.message },
-      };
-    }
-
-    sessionId = createResult.value.id;
-
-    if (createResult.value.isNew) {
-      promptNumber = 1;
-    } else {
-      const counterResult = incrementPromptCounter(deps.db, sessionId);
-      if (!counterResult.ok) {
-        return {
-          status: 500,
-          body: { error: counterResult.error.message },
-        };
-      }
-      promptNumber = counterResult.value;
-    }
-  } else {
-    sessionId = sessionResult.value.id;
-
-    const counterResult = incrementPromptCounter(deps.db, sessionId);
-    if (!counterResult.ok) {
-      return {
-        status: 500,
-        body: { error: counterResult.error.message },
-      };
-    }
-    promptNumber = counterResult.value;
-  }
-
-  // Store the prompt
-  const saveResult = saveUserPrompt(deps.db, {
-    claudeSessionId,
-    promptNumber,
-    promptText: prompt,
-  });
-
-  if (!saveResult.ok) {
-    return {
-      status: 500,
-      body: { error: saveResult.error.message },
-    };
-  }
-
-  return {
-    status: 200,
-    body: {
-      status: "stored",
-      claudeSessionId,
-      promptNumber,
-    },
-  };
-};
-
-/**
  * Retrieve relevant memories for a user prompt.
  * Uses the local model to extract search keywords, then queries FTS5
  * with optional embedding re-ranking.
@@ -357,13 +359,25 @@ export const handleRetrieve = async (
   deps: WorkerDeps,
   input: RetrieveInput,
 ): Promise<HandlerResponse> => {
-  const { prompt, project, limit } = input;
+  const { prompt, project, limit, sessionId } = input;
 
   if (!prompt) {
     return {
       status: 400,
       body: { error: "prompt is required" },
     };
+  }
+
+  // Skip retrieval on first prompt — SessionStart context is still fresh
+  if (sessionId) {
+    const sessionResult = getSessionByClaudeId(deps.db, sessionId);
+    if (!sessionResult.ok || !sessionResult.value) {
+      // Session not yet created — this is definitely the first prompt
+      return {
+        status: 200,
+        body: { context: null, observationCount: 0, typeCounts: {} },
+      };
+    }
   }
 
   if (!deps.modelManager) {
@@ -375,9 +389,8 @@ export const handleRetrieve = async (
 
   // Use local model to extract search keywords from the prompt
   const searchPrompt = buildSearchMemoryPrompt(prompt);
-  let modelOutput: string;
-  try {
-    modelOutput = await deps.modelManager.generateText(
+  const generateResult = await fromPromise(
+    deps.modelManager.generateText(
       [
         {
           role: "system",
@@ -387,13 +400,17 @@ export const handleRetrieve = async (
         { role: "user", content: searchPrompt },
       ],
       [SEARCH_MEMORY_TOOL],
-    );
-  } catch {
+    ),
+  );
+  if (!generateResult.ok) {
     return {
       status: 500,
-      body: { error: "Model generation failed" },
+      body: {
+        error: `Model generation failed: ${generateResult.error.message}`,
+      },
     };
   }
+  const modelOutput = generateResult.value;
 
   // Parse the tool call
   const toolCall = parseSearchToolCall(modelOutput);
@@ -410,10 +427,11 @@ export const handleRetrieve = async (
   }
 
   const query = toolCall.arguments.query;
-  const escapedQuery = escapeFts5Query(query);
+  const escapedQuery = escapeFts5QueryOr(query);
 
-  // Search with extra headroom for re-ranking
-  const fetchLimit = deps.modelManager ? limit * 2 : limit;
+  // Search ALL projects with extra headroom for re-ranking.
+  // Same-project bonus is applied during scoring, not as an SQL filter.
+  const fetchLimit = deps.modelManager ? limit * 3 : limit;
   const searchResult = searchObservations(deps.db, {
     query: escapedQuery,
     limit: fetchLimit,
@@ -426,47 +444,17 @@ export const handleRetrieve = async (
     };
   }
 
-  let observations = searchResult.value;
+  const reranked = await rerankWithEmbeddings({
+    db: deps.db,
+    modelManager: deps.modelManager,
+    router: deps.router,
+    observations: searchResult.value,
+    query,
+    project,
+    limit,
+  });
 
-  // Re-rank with embedding similarity
-  if (observations.length > 0) {
-    try {
-      const queryEmbedding = await deps.modelManager.computeEmbedding(query);
-      const ids = observations.map((o) => o.id);
-      const embeddingsResult = getEmbeddingsByIds(deps.db, { ids });
-
-      if (embeddingsResult.ok) {
-        const embeddings = embeddingsResult.value;
-        const scored = observations.map((obs, index) => {
-          const ftsScore = 1 - index / observations.length;
-          const stored = embeddings.get(obs.id);
-          const embScore = stored
-            ? cosineSimilarity(queryEmbedding, stored)
-            : 0;
-          return {
-            observation: obs,
-            combined: 0.6 * ftsScore + 0.4 * embScore,
-          };
-        });
-
-        scored.sort((a, b) => b.combined - a.combined);
-        observations = scored.slice(0, limit).map((s) => s.observation);
-
-        // Enqueue missing embeddings
-        if (deps.router) {
-          enqueueMissingEmbeddings(
-            deps.router,
-            searchResult.value,
-            new Set(embeddings.keys()),
-          );
-        }
-      }
-    } catch {
-      // Embedding failed — fall through with FTS-only results
-    }
-  }
-
-  observations = observations.slice(0, limit);
+  const observations = reranked.observations;
 
   if (observations.length === 0) {
     return {
@@ -806,43 +794,19 @@ export const handleSearch = async (
 
     let observations = result.value;
 
-    // Re-rank with embedding similarity when ModelManager is available
     if (deps.modelManager && observations.length > 0) {
-      const queryEmbedding = await deps.modelManager.computeEmbedding(query);
-      const ids = observations.map((o) => o.id);
-      const embeddingsResult = getEmbeddingsByIds(deps.db, { ids });
-
-      if (embeddingsResult.ok) {
-        const embeddings = embeddingsResult.value;
-
-        // Score each observation: 60% FTS position + 40% cosine similarity
-        const scored = observations.map((obs, index) => {
-          const ftsScore = 1 - index / observations.length;
-          const stored = embeddings.get(obs.id);
-          const embScore = stored
-            ? cosineSimilarity(queryEmbedding, stored)
-            : 0;
-          return {
-            observation: obs,
-            combined: 0.6 * ftsScore + 0.4 * embScore,
-          };
-        });
-
-        scored.sort((a, b) => b.combined - a.combined);
-        observations = scored.slice(0, limit).map((s) => s.observation);
-
-        // Enqueue embed messages for results without embeddings
-        if (deps.router) {
-          enqueueMissingEmbeddings(
-            deps.router,
-            result.value,
-            new Set(embeddings.keys()),
-          );
-        }
-      }
+      const reranked = await rerankWithEmbeddings({
+        db: deps.db,
+        modelManager: deps.modelManager,
+        router: deps.router,
+        observations,
+        query,
+        project,
+        limit,
+      });
+      observations = reranked.observations;
     }
 
-    // Always enforce limit (covers fallback paths)
     observations = observations.slice(0, limit);
 
     return {

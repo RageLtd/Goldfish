@@ -104,7 +104,7 @@ describe("handleRetrieve", () => {
     };
     const result = await handleRetrieve(deps, input);
     expect(result.status).toBe(500);
-    expect((result.body as { error: string }).error).toBe(
+    expect((result.body as { error: string }).error).toContain(
       "Model generation failed",
     );
   });

@@ -10,7 +10,6 @@ import {
   getSessionByClaudeId,
   incrementPromptCounter,
   runMigrations,
-  saveUserPrompt,
   searchObservations,
   storeObservation,
   storeSummary,
@@ -304,24 +303,6 @@ describe("database", () => {
       if (result.ok) {
         expect(result.value).toBeGreaterThan(0);
       }
-    });
-  });
-
-  describe("saveUserPrompt", () => {
-    it("stores user prompt", () => {
-      createSession(db, {
-        claudeSessionId: "claude-123",
-        project: "test-project",
-        userPrompt: "Initial",
-      });
-
-      const result = saveUserPrompt(db, {
-        claudeSessionId: "claude-123",
-        promptNumber: 1,
-        promptText: "Help me fix a bug",
-      });
-
-      expect(result.ok).toBe(true);
     });
   });
 

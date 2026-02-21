@@ -16,6 +16,7 @@ import { fromPromise } from "../types/result";
 import {
   cleanPrompt,
   isEntirelyPrivate,
+  isLowSignalPrompt,
   stripPrivateTags,
 } from "../utils/tag-stripping";
 import { projectFromCwd } from "../utils/validation";
@@ -309,27 +310,22 @@ export const processNewHook = async (
   const cleanedPrompt = cleanPrompt(input.prompt);
   const project = extractProject(input.cwd);
 
-  // Run storage and retrieval in parallel
-  const [, retrieveResult] = await Promise.all([
-    // Fire-and-forget: store the prompt
-    fromPromise(
-      postToWorker(deps, "/prompt", {
-        claudeSessionId: input.session_id,
-        prompt: cleanedPrompt,
-        cwd: input.cwd,
-      }),
-    ),
-    // Synchronous: retrieve relevant memories
-    project
-      ? fromPromise(
-          postToWorker(deps, "/retrieve", {
-            prompt: cleanedPrompt,
-            project,
-            limit: 20,
-          }),
-        )
-      : Promise.resolve({ ok: false as const, error: new Error("no project") }),
-  ]);
+  // Skip retrieval for low-signal prompts (affirmations, confirmations)
+  if (isLowSignalPrompt(cleanedPrompt)) {
+    return createSuccessOutput();
+  }
+
+  // Retrieve relevant memories
+  const retrieveResult = project
+    ? await fromPromise(
+        postToWorker(deps, "/retrieve", {
+          prompt: cleanedPrompt,
+          project,
+          limit: 20,
+          sessionId: input.session_id,
+        }),
+      )
+    : { ok: false as const, error: new Error("no project") };
 
   // If retrieval succeeded and has context, return it
   if (retrieveResult.ok) {
