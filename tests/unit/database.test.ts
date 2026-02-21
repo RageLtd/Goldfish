@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
   createDatabase,
   createSession,
+  deleteObservations,
+  findAllObservations,
   findSimilarObservation,
   getCandidateObservations,
   getObservationById,
@@ -746,6 +748,179 @@ describe("database", () => {
       expect(retrieved[0]).toBeCloseTo(0.1);
       expect(retrieved[1]).toBeCloseTo(0.2);
       expect(retrieved[2]).toBeCloseTo(0.3);
+    });
+  });
+
+  describe("findAllObservations", () => {
+    it("returns all observations ordered oldest-first", () => {
+      createSession(db, {
+        claudeSessionId: "sess-1",
+        project: "test-project",
+        userPrompt: "Test",
+      });
+
+      storeObservation(db, {
+        claudeSessionId: "sess-1",
+        project: "test-project",
+        observation: {
+          type: "discovery",
+          title: "First",
+          subtitle: null,
+          narrative: "First narrative",
+          facts: [],
+          concepts: [],
+          filesRead: [],
+          filesModified: [],
+        },
+        promptNumber: 1,
+      });
+
+      storeObservation(db, {
+        claudeSessionId: "sess-1",
+        project: "test-project",
+        observation: {
+          type: "feature",
+          title: "Second",
+          subtitle: null,
+          narrative: "Second narrative",
+          facts: [],
+          concepts: [],
+          filesRead: [],
+          filesModified: [],
+        },
+        promptNumber: 2,
+      });
+
+      const result = findAllObservations(db, {});
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toHaveLength(2);
+        expect(result.value[0].title).toBe("First");
+        expect(result.value[1].title).toBe("Second");
+      }
+    });
+
+    it("filters by project", () => {
+      createSession(db, {
+        claudeSessionId: "sess-a",
+        project: "project-a",
+        userPrompt: "Test",
+      });
+      createSession(db, {
+        claudeSessionId: "sess-b",
+        project: "project-b",
+        userPrompt: "Test",
+      });
+
+      storeObservation(db, {
+        claudeSessionId: "sess-a",
+        project: "project-a",
+        observation: {
+          type: "discovery",
+          title: "In A",
+          subtitle: null,
+          narrative: "Narrative A",
+          facts: [],
+          concepts: [],
+          filesRead: [],
+          filesModified: [],
+        },
+        promptNumber: 1,
+      });
+
+      storeObservation(db, {
+        claudeSessionId: "sess-b",
+        project: "project-b",
+        observation: {
+          type: "discovery",
+          title: "In B",
+          subtitle: null,
+          narrative: "Narrative B",
+          facts: [],
+          concepts: [],
+          filesRead: [],
+          filesModified: [],
+        },
+        promptNumber: 1,
+      });
+
+      const result = findAllObservations(db, { project: "project-a" });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toHaveLength(1);
+        expect(result.value[0].project).toBe("project-a");
+      }
+    });
+  });
+
+  describe("deleteObservations", () => {
+    it("deletes specific observations by ID", () => {
+      createSession(db, {
+        claudeSessionId: "sess-1",
+        project: "test-project",
+        userPrompt: "Test",
+      });
+
+      const id1 = storeObservation(db, {
+        claudeSessionId: "sess-1",
+        project: "test-project",
+        observation: {
+          type: "discovery",
+          title: "Keep me",
+          subtitle: null,
+          narrative: "Should survive",
+          facts: [],
+          concepts: [],
+          filesRead: ["src/foo.ts"],
+          filesModified: [],
+        },
+        promptNumber: 1,
+      });
+
+      const id2 = storeObservation(db, {
+        claudeSessionId: "sess-1",
+        project: "test-project",
+        observation: {
+          type: "change",
+          title: null,
+          subtitle: null,
+          narrative: null,
+          facts: [],
+          concepts: [],
+          filesRead: [],
+          filesModified: [],
+        },
+        promptNumber: 2,
+      });
+
+      expect(id1.ok).toBe(true);
+      expect(id2.ok).toBe(true);
+      if (!id1.ok || !id2.ok) throw new Error("Setup failed");
+
+      const deleteResult = deleteObservations(db, [id2.value]);
+      expect(deleteResult.ok).toBe(true);
+      if (deleteResult.ok) {
+        // changes count includes FTS trigger operations, so just verify > 0
+        expect(deleteResult.value).toBeGreaterThan(0);
+      }
+
+      // Verify kept observation still exists
+      const kept = getObservationById(db, id1.value);
+      expect(kept.ok).toBe(true);
+      if (kept.ok) expect(kept.value).not.toBeNull();
+
+      // Verify deleted observation is gone
+      const deleted = getObservationById(db, id2.value);
+      expect(deleted.ok).toBe(true);
+      if (deleted.ok) expect(deleted.value).toBeNull();
+    });
+
+    it("errors on empty ids array", () => {
+      const result = deleteObservations(db, []);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain("empty");
+      }
     });
   });
 

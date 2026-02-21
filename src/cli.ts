@@ -48,6 +48,10 @@ const COMMANDS: Record<string, () => Promise<void>> = {
     const { main } = await import("./commands/backfill");
     await main();
   },
+  prune: async () => {
+    const { main } = await import("./commands/prune");
+    await main();
+  },
   version: async () => {
     console.log(`goldfish v${pkg.version}`);
   },
@@ -66,6 +70,7 @@ Commands:
   hook:cleanup    SessionEnd hook - cleanup session
   worker          Start HTTP worker service
   backfill        Compute embeddings for observations without them
+  prune           Find and delete low-value observations
   version         Show version
 
 Examples:

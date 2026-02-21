@@ -664,6 +664,70 @@ export const updateObservationEmbedding = (
 };
 
 // ============================================================================
+// Bulk Retrieval and Deletion (for prune)
+// ============================================================================
+
+interface FindAllObservationsInput {
+  readonly project?: string;
+  readonly limit?: number;
+}
+
+/**
+ * Retrieves observations ordered oldest-first, with optional project filter.
+ * Caller does quality filtering in-process.
+ */
+export const findAllObservations = (
+  db: Database,
+  input: FindAllObservationsInput,
+): Result<readonly Observation[]> => {
+  return fromTry(() => {
+    let query = "SELECT * FROM observations";
+    const params: (string | number)[] = [];
+
+    if (input.project) {
+      query += " WHERE project = ?";
+      params.push(input.project);
+    }
+
+    query += " ORDER BY id ASC";
+
+    if (input.limit) {
+      query += " LIMIT ?";
+      params.push(input.limit);
+    }
+
+    const rows = db
+      .query<ObservationRow, (string | number)[]>(query)
+      .all(...params);
+
+    return rows.map(rowToObservation);
+  });
+};
+
+/**
+ * Deletes observations by ID. Returns count of rows deleted.
+ * Errors on empty array (no silent fallbacks).
+ * FTS triggers handle index cleanup automatically.
+ */
+export const deleteObservations = (
+  db: Database,
+  ids: readonly number[],
+): Result<number> => {
+  if (ids.length === 0) {
+    return err(new Error("deleteObservations called with empty ids array"));
+  }
+
+  return fromTry(() => {
+    const placeholders = ids.map(() => "?").join(",");
+    const result = db.run(
+      `DELETE FROM observations WHERE id IN (${placeholders})`,
+      [...ids],
+    );
+    return result.changes;
+  });
+};
+
+// ============================================================================
 // Deduplication
 // ============================================================================
 
