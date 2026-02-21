@@ -9,6 +9,7 @@ import {
   createSession,
   runMigrations,
   storeObservation,
+  updateObservationEmbedding,
 } from "../../src/db/index";
 import type { ModelManager } from "../../src/models/manager";
 import {
@@ -42,7 +43,7 @@ describe("handleRetrieve", () => {
       }),
       generateText: mock(() =>
         Promise.resolve(
-          '<tool_call>\n{"name": "search_memory", "arguments": {"query": "auth bug fix"}}\n</tool_call>',
+          '<tool_call>\n{"name": "search_memory_semantic", "arguments": {"query": "auth bug fix"}}\n</tool_call>',
         ),
       ),
       computeEmbedding: mock(() =>
@@ -123,7 +124,7 @@ describe("handleRetrieve", () => {
       userPrompt: "test prompt",
     });
 
-    storeObservation(db, {
+    const obsResult = storeObservation(db, {
       claudeSessionId: "session-1",
       project: "test",
       promptNumber: 1,
@@ -140,12 +141,21 @@ describe("handleRetrieve", () => {
       },
     });
 
+    // Store embedding so semantic search can find it
+    if (obsResult.ok) {
+      updateObservationEmbedding(
+        db,
+        obsResult.value,
+        new Float32Array([0.1, 0.2, 0.3]),
+      );
+    }
+
     // Model extracts "auth token refresh" as search query
     (
       mockModelManager.generateText as ReturnType<typeof mock>
     ).mockImplementation(() =>
       Promise.resolve(
-        '<tool_call>\n{"name": "search_memory", "arguments": {"query": "auth token refresh"}}\n</tool_call>',
+        '<tool_call>\n{"name": "search_memory_semantic", "arguments": {"query": "auth token refresh"}}\n</tool_call>',
       ),
     );
 

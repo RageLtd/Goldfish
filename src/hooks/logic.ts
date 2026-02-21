@@ -321,7 +321,7 @@ export const processNewHook = async (
         postToWorker(deps, "/retrieve", {
           prompt: cleanedPrompt,
           project,
-          limit: 20,
+          limit: 5,
           sessionId: input.session_id,
         }),
       )

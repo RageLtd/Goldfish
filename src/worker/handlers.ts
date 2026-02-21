@@ -20,7 +20,6 @@ import {
 import type { ModelManager } from "../models/manager";
 import {
   buildSearchMemoryPrompt,
-  SEARCH_MEMORY_FTS_TOOL,
   SEARCH_MEMORY_SEMANTIC_TOOL,
 } from "../models/prompts";
 import { parseSmartSearchToolCall } from "../models/tool-call-parser";
@@ -63,7 +62,7 @@ export const EMBEDDING_WEIGHT = 0.4;
  * weakly-related memories as noise.
  * Score = FTS_WEIGHT * ftsRank + EMBEDDING_WEIGHT * embeddingSimilarity + sameProjectBonus.
  */
-export const RETRIEVE_MIN_RELEVANCE = 0.3;
+export const RETRIEVE_MIN_RELEVANCE = 0.4;
 
 /**
  * Additive bonus for observations from the same project as the query.
@@ -548,7 +547,7 @@ export const handleRetrieve = async (
     };
   }
 
-  // Use local model to choose search strategy and extract query
+  // Use local model to decide whether retrieval is needed and extract query
   const searchPrompt = buildSearchMemoryPrompt(prompt);
   const generateResult = await fromPromise(
     deps.modelManager.generateText(
@@ -556,11 +555,11 @@ export const handleRetrieve = async (
         {
           role: "system",
           content:
-            "You route memory searches. Choose search_memory_semantic (default) or search_memory_fts (exact keywords only).",
+            "You decide whether to search project memory. Only call search_memory_semantic when the prompt needs past context or code understanding. Otherwise respond without calling any tool.",
         },
         { role: "user", content: searchPrompt },
       ],
-      [SEARCH_MEMORY_FTS_TOOL, SEARCH_MEMORY_SEMANTIC_TOOL],
+      [SEARCH_MEMORY_SEMANTIC_TOOL],
     ),
   );
   if (!generateResult.ok) {
@@ -590,26 +589,15 @@ export const handleRetrieve = async (
     };
   }
 
-  // Execute search based on mode
-  const searchResult =
-    toolCall.mode === "semantic"
-      ? await semanticSearch({
-          db: deps.db,
-          modelManager: deps.modelManager,
-          router: deps.router,
-          query: toolCall.query,
-          project,
-          limit,
-        })
-      : await searchAndRank({
-          db: deps.db,
-          modelManager: deps.modelManager,
-          router: deps.router,
-          query: toolCall.query,
-          project,
-          limit,
-          escapeMode: "or",
-        });
+  // Always use semantic (embedding-based) search for retrieval
+  const searchResult = await semanticSearch({
+    db: deps.db,
+    modelManager: deps.modelManager,
+    router: deps.router,
+    query: toolCall.query,
+    project,
+    limit,
+  });
 
   if (!searchResult.ok) {
     return {
