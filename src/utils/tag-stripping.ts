@@ -65,6 +65,7 @@ export const isEntirelyPrivate = (content: string): boolean =>
  * that don't contain project-relevant information worth searching memory for.
  */
 const LOW_SIGNAL_PATTERNS: ReadonlySet<string> = new Set([
+  // Affirmations
   "yes",
   "no",
   "ok",
@@ -74,13 +75,27 @@ const LOW_SIGNAL_PATTERNS: ReadonlySet<string> = new Set([
   "yup",
   "nope",
   "nah",
+  "y",
+  "n",
+  "k",
+  // Filler
+  "hmm",
+  "hm",
+  "ah",
+  "oh",
+  "uh",
+  "eh",
+  "mhm",
+  // Agreement
   "agreed",
   "correct",
   "right",
   "exactly",
+  // Gratitude
   "thanks",
   "thank you",
   "ty",
+  // Approval
   "lgtm",
   "looks good",
   "sounds good",
@@ -104,6 +119,27 @@ const LOW_SIGNAL_PATTERNS: ReadonlySet<string> = new Set([
   "ship it",
   "approve",
   "approved",
+  // Short questions
+  "what",
+  "why",
+  "how",
+  "where",
+  "when",
+  "really",
+  "seriously",
+  // Acknowledgments
+  "noted",
+  "done",
+  "fixed",
+  "merged",
+  "pushed",
+  "committed",
+  // Navigation
+  "next",
+  "back",
+  "again",
+  "more",
+  "less",
 ]);
 
 /**
@@ -127,7 +163,27 @@ export const isLowSignalPrompt = (cleaned: string): boolean => {
   if (normalized.length === 0) return false;
 
   // Direct pattern match against known low-signal phrases
-  return LOW_SIGNAL_PATTERNS.has(normalized);
+  if (LOW_SIGNAL_PATTERNS.has(normalized)) return true;
+
+  // Code-like tokens bypass word-count check
+  if (
+    /[a-z][A-Z]/.test(trimmed) || // camelCase
+    /^[A-Z][a-z]+[A-Z]/.test(trimmed) || // PascalCase
+    trimmed.includes("_") || // snake_case
+    trimmed.includes("`") || // backticks
+    /\/\S/.test(trimmed) || // paths (slash followed by non-space)
+    /\.\w/.test(trimmed) // file extensions / dotted names
+  )
+    return false;
+
+  // Technical keywords (>4 chars, not in low-signal set) bypass word-count check
+  const words = normalized.split(/\s+/);
+  if (words.some((w) => !LOW_SIGNAL_PATTERNS.has(w) && w.length > 4))
+    return false;
+
+  // Short prompts below word threshold are low-signal
+  const minWords = parseInt(process.env.GOLDFISH_MIN_PROMPT_WORDS || "3", 10);
+  return words.length < minWords;
 };
 
 /**

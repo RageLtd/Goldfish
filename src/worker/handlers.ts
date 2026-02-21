@@ -9,6 +9,8 @@ import {
   getCandidateObservations,
   getEmbeddingsByIds,
   getObservationById,
+  getObservationsWithEmbeddings,
+  getObservationsWithoutEmbeddings,
   getRecentObservations,
   getRecentSummaries,
   getSessionByClaudeId,
@@ -16,10 +18,14 @@ import {
   searchSummaries,
 } from "../db/index";
 import type { ModelManager } from "../models/manager";
-import { buildSearchMemoryPrompt, SEARCH_MEMORY_TOOL } from "../models/prompts";
-import { parseSearchToolCall } from "../models/tool-call-parser";
+import {
+  buildSearchMemoryPrompt,
+  SEARCH_MEMORY_FTS_TOOL,
+  SEARCH_MEMORY_SEMANTIC_TOOL,
+} from "../models/prompts";
+import { parseSmartSearchToolCall } from "../models/tool-call-parser";
 import type { Observation } from "../types/domain";
-import { fromPromise } from "../types/result";
+import { fromPromise, ok, type Result } from "../types/result";
 import {
   formatContextFull,
   formatContextIndex,
@@ -37,7 +43,11 @@ import {
   escapeFts5QueryOr,
   projectFromCwd,
 } from "../utils/validation";
-import type { MessageRouter } from "./message-router";
+import {
+  getLastPruneStats,
+  type LastPruneStats,
+  type MessageRouter,
+} from "./message-router";
 
 // ============================================================================
 // Constants
@@ -81,17 +91,16 @@ const enqueueMissingEmbeddings = (
   existingIds: Set<number>,
 ): void => {
   for (const obs of observations) {
-    if (!existingIds.has(obs.id) && obs.title) {
-      router.enqueue({
-        type: "embed",
-        claudeSessionId: obs.sdkSessionId,
-        data: {
-          observationId: obs.id,
-          title: obs.title ?? "",
-          narrative: obs.narrative ?? "",
-        },
-      });
-    }
+    if (existingIds.has(obs.id) || !obs.title) continue;
+    router.enqueue({
+      type: "embed",
+      claudeSessionId: obs.sdkSessionId,
+      data: {
+        observationId: obs.id,
+        title: obs.title ?? "",
+        narrative: obs.narrative ?? "",
+      },
+    });
   }
 };
 
@@ -168,6 +177,156 @@ const rerankWithEmbeddings = async (
   }
 
   return { observations: ranked, reranked: true };
+};
+
+// ============================================================================
+// Shared Search + Rerank Pipeline
+// ============================================================================
+
+export interface SearchAndRankInput {
+  readonly db: Database;
+  readonly modelManager: ModelManager;
+  readonly router?: MessageRouter;
+  readonly query: string;
+  readonly project?: string;
+  readonly concept?: string;
+  readonly limit: number;
+  readonly escapeMode: "or" | "exact";
+}
+
+export interface SearchAndRankResult {
+  readonly observations: readonly Observation[];
+  readonly reranked: boolean;
+}
+
+/**
+ * Shared FTS5 search → embedding rerank pipeline.
+ * Used by both handleRetrieve (or-mode) and handleSearch (exact-mode).
+ */
+export const searchAndRank = async (
+  input: SearchAndRankInput,
+): Promise<Result<SearchAndRankResult>> => {
+  const {
+    db,
+    modelManager,
+    router,
+    query,
+    project,
+    concept,
+    limit,
+    escapeMode,
+  } = input;
+
+  const escapedQuery =
+    escapeMode === "or" ? escapeFts5QueryOr(query) : escapeFts5Query(query);
+
+  const fetchLimit = limit * 3;
+  const searchResult = searchObservations(db, {
+    query: escapedQuery,
+    concept,
+    project,
+    limit: fetchLimit,
+  });
+
+  if (!searchResult.ok) {
+    return searchResult;
+  }
+
+  const reranked = await rerankWithEmbeddings({
+    db,
+    modelManager,
+    router,
+    observations: searchResult.value,
+    query,
+    project,
+    limit,
+  });
+
+  return ok({
+    observations: reranked.observations,
+    reranked: reranked.reranked,
+  });
+};
+
+// ============================================================================
+// Semantic Search
+// ============================================================================
+
+export interface SemanticSearchInput {
+  readonly db: Database;
+  readonly modelManager: ModelManager;
+  readonly router?: MessageRouter;
+  readonly query: string;
+  readonly project?: string;
+  readonly limit: number;
+}
+
+/**
+ * Pure embedding-based search — computes query embedding and ranks by cosine similarity.
+ * No FTS5 dependency. Finds conceptually related memories regardless of keyword overlap.
+ */
+export const semanticSearch = async (
+  input: SemanticSearchInput,
+): Promise<Result<SearchAndRankResult>> => {
+  const { db, modelManager, router, query, project, limit } = input;
+
+  const embeddingResult = await fromPromise(
+    modelManager.computeEmbedding(query),
+  );
+  if (!embeddingResult.ok) {
+    return embeddingResult;
+  }
+
+  const queryEmbedding = embeddingResult.value;
+  const candidatesResult = getObservationsWithEmbeddings(db, {
+    limit: limit * 5,
+  });
+
+  if (!candidatesResult.ok) {
+    return candidatesResult;
+  }
+
+  const candidates = candidatesResult.value;
+
+  const scored = candidates.map((c) => {
+    const similarity = cosineSimilarity(queryEmbedding, c.embedding);
+    const projectBonus =
+      project && c.project === project ? RETRIEVE_SAME_PROJECT_BONUS : 0;
+    return { candidate: c, score: similarity + projectBonus };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  const filtered = scored
+    .filter((s) => s.score >= RETRIEVE_MIN_RELEVANCE)
+    .slice(0, limit);
+
+  // Convert back to Observation shape
+  const observations: Observation[] = filtered.map((s) => ({
+    id: s.candidate.id,
+    sdkSessionId: s.candidate.sdkSessionId,
+    project: s.candidate.project,
+    type: s.candidate.type as Observation["type"],
+    title: s.candidate.title,
+    subtitle: null,
+    narrative: s.candidate.narrative,
+    facts: [],
+    concepts: [],
+    filesRead: [],
+    filesModified: [],
+    promptNumber: 0,
+    discoveryTokens: 0,
+    createdAt: "",
+    createdAtEpoch: s.candidate.createdAtEpoch,
+  }));
+
+  // Enqueue embeddings for candidates without (shouldn't happen but safety)
+  if (router) {
+    const existingIds = new Set(candidates.map((c) => c.id));
+    enqueueMissingEmbeddings(router, observations, existingIds);
+  }
+
+  return ok({ observations, reranked: true });
 };
 
 // ============================================================================
@@ -263,6 +422,7 @@ export interface HealthCheckResponse {
   readonly version: string;
   readonly uptimeSeconds: number;
   readonly pendingMessages: number;
+  readonly lastPrune: LastPruneStats | null;
 }
 
 /**
@@ -284,6 +444,7 @@ export const handleHealth = async (
       version: deps.version || "unknown",
       uptimeSeconds,
       pendingMessages,
+      lastPrune: getLastPruneStats(),
     },
   };
 };
@@ -387,7 +548,7 @@ export const handleRetrieve = async (
     };
   }
 
-  // Use local model to extract search keywords from the prompt
+  // Use local model to choose search strategy and extract query
   const searchPrompt = buildSearchMemoryPrompt(prompt);
   const generateResult = await fromPromise(
     deps.modelManager.generateText(
@@ -395,11 +556,11 @@ export const handleRetrieve = async (
         {
           role: "system",
           content:
-            "You extract search keywords from user prompts. Call search_memory with a concise query.",
+            "You route memory searches. Choose search_memory_semantic (default) or search_memory_fts (exact keywords only).",
         },
         { role: "user", content: searchPrompt },
       ],
-      [SEARCH_MEMORY_TOOL],
+      [SEARCH_MEMORY_FTS_TOOL, SEARCH_MEMORY_SEMANTIC_TOOL],
     ),
   );
   if (!generateResult.ok) {
@@ -412,8 +573,11 @@ export const handleRetrieve = async (
   }
   const modelOutput = generateResult.value;
 
-  // Parse the tool call
-  const toolCall = parseSearchToolCall(modelOutput);
+  // Parse the smart tool call (fts, semantic, or legacy)
+  const toolCall = parseSmartSearchToolCall(modelOutput);
+  if (toolCall) {
+    console.log(`[retrieve] mode=${toolCall.mode} query="${toolCall.query}"`);
+  }
   if (!toolCall) {
     // Model decided prompt is not searchable (greeting, small talk, etc.)
     return {
@@ -426,16 +590,26 @@ export const handleRetrieve = async (
     };
   }
 
-  const query = toolCall.arguments.query;
-  const escapedQuery = escapeFts5QueryOr(query);
-
-  // Search ALL projects with extra headroom for re-ranking.
-  // Same-project bonus is applied during scoring, not as an SQL filter.
-  const fetchLimit = deps.modelManager ? limit * 3 : limit;
-  const searchResult = searchObservations(deps.db, {
-    query: escapedQuery,
-    limit: fetchLimit,
-  });
+  // Execute search based on mode
+  const searchResult =
+    toolCall.mode === "semantic"
+      ? await semanticSearch({
+          db: deps.db,
+          modelManager: deps.modelManager,
+          router: deps.router,
+          query: toolCall.query,
+          project,
+          limit,
+        })
+      : await searchAndRank({
+          db: deps.db,
+          modelManager: deps.modelManager,
+          router: deps.router,
+          query: toolCall.query,
+          project,
+          limit,
+          escapeMode: "or",
+        });
 
   if (!searchResult.ok) {
     return {
@@ -444,17 +618,7 @@ export const handleRetrieve = async (
     };
   }
 
-  const reranked = await rerankWithEmbeddings({
-    db: deps.db,
-    modelManager: deps.modelManager,
-    router: deps.router,
-    observations: searchResult.value,
-    query,
-    project,
-    limit,
-  });
-
-  const observations = reranked.observations;
+  const observations = searchResult.value.observations;
 
   if (observations.length === 0) {
     return {
@@ -482,6 +646,8 @@ export const handleRetrieve = async (
       context,
       observationCount: observations.length,
       typeCounts,
+      searchMode: toolCall.mode,
+      reranked: searchResult.value.reranked,
     },
   };
 };
@@ -773,17 +939,12 @@ export const handleSearch = async (
     };
   }
 
-  // Escape query for FTS5 safety
-  const escapedQuery = escapeFts5Query(query);
-
-  if (type === "observations") {
-    // Fetch extra results for re-ranking headroom
-    const fetchLimit = deps.modelManager ? limit * 2 : limit;
-    const result = searchObservations(deps.db, {
+  if (type === "summaries") {
+    const escapedQuery = escapeFts5Query(query);
+    const result = searchSummaries(deps.db, {
       query: escapedQuery,
-      concept,
       project,
-      limit: fetchLimit,
+      limit,
     });
     if (!result.ok) {
       return {
@@ -791,51 +952,56 @@ export const handleSearch = async (
         body: { error: result.error.message },
       };
     }
-
-    let observations = result.value;
-
-    if (deps.modelManager && observations.length > 0) {
-      const reranked = await rerankWithEmbeddings({
-        db: deps.db,
-        modelManager: deps.modelManager,
-        router: deps.router,
-        observations,
-        query,
-        project,
-        limit,
-      });
-      observations = reranked.observations;
-    }
-
-    observations = observations.slice(0, limit);
-
     return {
       status: 200,
-      body: {
-        results: observations,
-        count: observations.length,
-      },
+      body: { results: result.value, count: result.value.length },
     };
   }
 
-  // type === 'summaries'
-  const result = searchSummaries(deps.db, {
-    query: escapedQuery,
+  // type === "observations" — use searchAndRank if model available, else plain FTS
+  if (!deps.modelManager) {
+    const escapedQuery = escapeFts5Query(query);
+    const result = searchObservations(deps.db, {
+      query: escapedQuery,
+      concept,
+      project,
+      limit,
+    });
+    if (!result.ok) {
+      return {
+        status: 500,
+        body: { error: result.error.message },
+      };
+    }
+    return {
+      status: 200,
+      body: { results: result.value, count: result.value.length },
+    };
+  }
+
+  const rankResult = await searchAndRank({
+    db: deps.db,
+    modelManager: deps.modelManager,
+    router: deps.router,
+    query,
+    concept,
     project,
     limit,
+    escapeMode: "exact",
   });
-  if (!result.ok) {
+
+  if (!rankResult.ok) {
     return {
       status: 500,
-      body: { error: result.error.message },
+      body: { error: rankResult.error.message },
     };
   }
 
   return {
     status: 200,
     body: {
-      results: result.value,
-      count: result.value.length,
+      results: rankResult.value.observations,
+      count: rankResult.value.observations.length,
     },
   };
 };
@@ -987,6 +1153,58 @@ export const handleFindByFile = async (
     body: {
       results: matching,
       count: matching.length,
+    },
+  };
+};
+
+/**
+ * Enqueue embedding computation for observations that lack embeddings.
+ * Fire-and-forget — returns immediately after enqueuing.
+ */
+export const handleBackfill = async (
+  deps: WorkerDeps,
+): Promise<HandlerResponse> => {
+  const batchResult = getObservationsWithoutEmbeddings(deps.db, { limit: 500 });
+  if (!batchResult.ok) {
+    return { status: 500, body: { error: batchResult.error.message } };
+  }
+
+  const batch = batchResult.value;
+  if (!deps.router || batch.length === 0) {
+    return { status: 200, body: { enqueued: 0 } };
+  }
+
+  for (const obs of batch) {
+    deps.router.enqueue({
+      type: "embed",
+      claudeSessionId: "",
+      data: {
+        observationId: obs.id,
+        title: obs.title ?? "",
+        narrative: obs.narrative ?? "",
+      },
+    });
+  }
+
+  return { status: 200, body: { enqueued: batch.length } };
+};
+
+/**
+ * Check how many observations still lack embeddings.
+ */
+export const handleBackfillStatus = async (
+  deps: WorkerDeps,
+): Promise<HandlerResponse> => {
+  const result = getObservationsWithoutEmbeddings(deps.db, { limit: 10000 });
+  if (!result.ok) {
+    return { status: 500, body: { error: result.error.message } };
+  }
+
+  return {
+    status: 200,
+    body: {
+      remaining: result.value.length,
+      pendingMessages: deps.router?.pending() ?? 0,
     },
   };
 };

@@ -42,16 +42,28 @@ export interface EmbedData {
   readonly narrative: string;
 }
 
+export interface PruneData {
+  readonly maxAgeDays: number;
+  readonly dedupThreshold: number;
+  readonly minScore: number;
+}
+
 export type RouterMessageType =
   | "observation"
   | "summarize"
   | "complete"
-  | "embed";
+  | "embed"
+  | "prune";
 
 export interface RouterMessage {
   readonly type: RouterMessageType;
   readonly claudeSessionId: string;
-  readonly data: ObservationData | SummarizeData | CompleteData | EmbedData;
+  readonly data:
+    | ObservationData
+    | SummarizeData
+    | CompleteData
+    | EmbedData
+    | PruneData;
 }
 
 export interface MessageRouterDeps {
@@ -109,9 +121,39 @@ export interface ProcessMessageDeps extends LocalAgentDeps {
   readonly enqueue: (msg: RouterMessage) => void;
 }
 
+/** Auto-prune defaults (read from env at module load) */
+const AUTO_PRUNE_MAX_AGE_DAYS = parseInt(
+  process.env.GOLDFISH_PRUNE_MAX_AGE_DAYS || "90",
+  10,
+);
+const AUTO_PRUNE_DEDUP_THRESHOLD = parseFloat(
+  process.env.GOLDFISH_PRUNE_DEDUP_THRESHOLD || "0.92",
+);
+const AUTO_PRUNE_MIN_SCORE = parseFloat(
+  process.env.GOLDFISH_PRUNE_MIN_SCORE || "0.2",
+);
+
+/** Rate-limit auto-prune: run at most once per 24 hours */
+const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+export interface LastPruneStats {
+  readonly epoch: number;
+  readonly aged: number;
+  readonly duplicates: number;
+  readonly lowScore: number;
+  readonly deleted: number;
+}
+
+/** Module-level last prune stats, queryable by handlers. */
+let _lastPruneStats: LastPruneStats | null = null;
+
+export const getLastPruneStats = (): LastPruneStats | null => _lastPruneStats;
+
 export const createProcessMessage = (
   deps: ProcessMessageDeps,
 ): ((msg: RouterMessage) => Promise<void>) => {
+  let lastPruneEpoch = 0;
+
   return async (msg: RouterMessage): Promise<void> => {
     const { db } = deps;
 
@@ -130,6 +172,30 @@ export const createProcessMessage = (
           `Failed to store embedding for #${data.observationId}: ${result.error.message}`,
         );
       }
+      return;
+    }
+
+    // Prune messages run inline — no session context needed
+    if (msg.type === "prune") {
+      const data = msg.data as PruneData;
+      // Dynamic import to avoid circular dependency
+      const { runPrune } = await import("../commands/prune");
+      const result = runPrune(db, {
+        maxAgeDays: data.maxAgeDays,
+        dedupThreshold: data.dedupThreshold,
+        minScore: data.minScore,
+        dryRun: false,
+      });
+      _lastPruneStats = {
+        epoch: Date.now(),
+        aged: result.aged,
+        duplicates: result.duplicates,
+        lowScore: result.lowScore,
+        deleted: result.deleted,
+      };
+      log(
+        `Auto-prune complete: ${result.deleted} deleted (${result.aged} aged, ${result.duplicates} dups, ${result.lowScore} low-score)`,
+      );
       return;
     }
 
@@ -186,6 +252,21 @@ export const createProcessMessage = (
 
     if (msg.type === "complete") {
       updateSessionStatus(db, session.id, "completed");
+
+      // Rate-limited auto-prune on session completion
+      const now = Date.now();
+      if (now - lastPruneEpoch >= PRUNE_INTERVAL_MS) {
+        lastPruneEpoch = now;
+        deps.enqueue({
+          type: "prune",
+          claudeSessionId: msg.claudeSessionId,
+          data: {
+            maxAgeDays: AUTO_PRUNE_MAX_AGE_DAYS,
+            dedupThreshold: AUTO_PRUNE_DEDUP_THRESHOLD,
+            minScore: AUTO_PRUNE_MIN_SCORE,
+          },
+        });
+      }
     }
   };
 };

@@ -368,6 +368,57 @@ describe("message-router integration", () => {
     expect(modelManager.computeEmbedding).toHaveBeenCalledTimes(1);
   });
 
+  it("enqueues prune after first complete message", async () => {
+    const modelManager = createMockModelManager();
+    const enqueuedMessages: RouterMessage[] = [];
+    const processMessage = createProcessMessage({
+      db,
+      modelManager,
+      enqueue: (msg) => enqueuedMessages.push(msg),
+    });
+    const router = createMessageRouter({ processMessage });
+
+    router.enqueue({
+      type: "complete",
+      claudeSessionId: "test-session-int",
+      data: { reason: "exit" },
+    });
+
+    await router.shutdown();
+
+    // Should have enqueued a prune message
+    const pruneMessages = enqueuedMessages.filter((m) => m.type === "prune");
+    expect(pruneMessages.length).toBe(1);
+  });
+
+  it("rate-limits prune to once per interval", async () => {
+    const modelManager = createMockModelManager();
+    const enqueuedMessages: RouterMessage[] = [];
+    const processMessage = createProcessMessage({
+      db,
+      modelManager,
+      enqueue: (msg) => enqueuedMessages.push(msg),
+    });
+    const router = createMessageRouter({ processMessage });
+
+    // Two consecutive completes — second should NOT trigger prune
+    router.enqueue({
+      type: "complete",
+      claudeSessionId: "test-session-int",
+      data: { reason: "exit" },
+    });
+    router.enqueue({
+      type: "complete",
+      claudeSessionId: "test-session-int",
+      data: { reason: "exit again" },
+    });
+
+    await router.shutdown();
+
+    const pruneMessages = enqueuedMessages.filter((m) => m.type === "prune");
+    expect(pruneMessages.length).toBe(1);
+  });
+
   it("skips messages for unknown sessions", async () => {
     const modelManager = createMockModelManager();
     const processMessage = createProcessMessage({

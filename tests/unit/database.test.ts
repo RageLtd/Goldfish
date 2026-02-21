@@ -3,9 +3,12 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
   createDatabase,
   createSession,
+  deleteObservationsByIds,
   findSimilarObservation,
   getCandidateObservations,
   getObservationById,
+  getObservationsForPruning,
+  getObservationsWithEmbeddings,
   getRecentObservations,
   getSessionByClaudeId,
   incrementPromptCounter,
@@ -13,6 +16,7 @@ import {
   searchObservations,
   storeObservation,
   storeSummary,
+  updateObservationEmbedding,
   updateSessionStatus,
 } from "../../src/db/index";
 import type { ParsedObservation, ParsedSummary } from "../../src/types/domain";
@@ -805,6 +809,177 @@ describe("database", () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value).toBeNull();
+      }
+    });
+  });
+
+  describe("deleteObservationsByIds", () => {
+    it("deletes observations by ID list", () => {
+      createSession(db, {
+        claudeSessionId: "sess-del",
+        project: "test",
+        userPrompt: "Test",
+      });
+
+      const id1 = storeObservation(db, {
+        claudeSessionId: "sess-del",
+        project: "test",
+        observation: {
+          type: "discovery",
+          title: "First obs",
+          subtitle: null,
+          narrative: "first",
+          facts: [],
+          concepts: [],
+          filesRead: [],
+          filesModified: [],
+        },
+        promptNumber: 1,
+      });
+
+      const id2 = storeObservation(db, {
+        claudeSessionId: "sess-del",
+        project: "test",
+        observation: {
+          type: "discovery",
+          title: "Second obs",
+          subtitle: null,
+          narrative: "second",
+          facts: [],
+          concepts: [],
+          filesRead: [],
+          filesModified: [],
+        },
+        promptNumber: 2,
+      });
+
+      expect(id1.ok && id2.ok).toBe(true);
+      if (!id1.ok || !id2.ok) return;
+
+      const result = deleteObservationsByIds(db, { ids: [id1.value] });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // changes count includes FTS trigger operations, so just check > 0
+        expect(result.value).toBeGreaterThan(0);
+      }
+
+      // Verify only one remains
+      const remaining = getRecentObservations(db, { limit: 10 });
+      expect(remaining.ok).toBe(true);
+      if (remaining.ok) {
+        expect(remaining.value).toHaveLength(1);
+        expect(remaining.value[0].title).toBe("Second obs");
+      }
+    });
+
+    it("returns 0 for empty ID list", () => {
+      const result = deleteObservationsByIds(db, { ids: [] });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBe(0);
+      }
+    });
+  });
+
+  describe("getObservationsForPruning", () => {
+    it("returns observations with pruning metadata", () => {
+      createSession(db, {
+        claudeSessionId: "sess-prune",
+        project: "test",
+        userPrompt: "Test",
+      });
+
+      storeObservation(db, {
+        claudeSessionId: "sess-prune",
+        project: "test",
+        observation: {
+          type: "bugfix",
+          title: "Fix something",
+          subtitle: null,
+          narrative: "Fixed it",
+          facts: [],
+          concepts: [],
+          filesRead: [],
+          filesModified: [],
+        },
+        promptNumber: 1,
+      });
+
+      const result = getObservationsForPruning(db);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.length).toBeGreaterThan(0);
+        const candidate = result.value[0];
+        expect(candidate.id).toBeGreaterThan(0);
+        expect(candidate.type).toBe("bugfix");
+        expect(candidate.project).toBe("test");
+        expect(candidate.hasEmbedding).toBe(false);
+      }
+    });
+  });
+
+  describe("getObservationsWithEmbeddings", () => {
+    it("returns observations that have embeddings", () => {
+      createSession(db, {
+        claudeSessionId: "sess-emb",
+        project: "test",
+        userPrompt: "Test",
+      });
+
+      const obsResult = storeObservation(db, {
+        claudeSessionId: "sess-emb",
+        project: "test",
+        observation: {
+          type: "discovery",
+          title: "Embedded obs",
+          subtitle: null,
+          narrative: "Has embedding",
+          facts: [],
+          concepts: [],
+          filesRead: [],
+          filesModified: [],
+        },
+        promptNumber: 1,
+      });
+      expect(obsResult.ok).toBe(true);
+      if (!obsResult.ok) return;
+
+      // Store embedding
+      const embedding = new Float32Array([0.1, 0.2, 0.3]);
+      updateObservationEmbedding(db, obsResult.value, embedding);
+
+      // Also store one without embedding
+      storeObservation(db, {
+        claudeSessionId: "sess-emb",
+        project: "test",
+        observation: {
+          type: "discovery",
+          title: "No embedding obs",
+          subtitle: null,
+          narrative: "No embedding",
+          facts: [],
+          concepts: [],
+          filesRead: [],
+          filesModified: [],
+        },
+        promptNumber: 2,
+      });
+
+      const result = getObservationsWithEmbeddings(db, { limit: 10 });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // Only the one with embedding should be returned
+        expect(result.value).toHaveLength(1);
+        expect(result.value[0].title).toBe("Embedded obs");
+        expect(result.value[0].embedding.length).toBe(3);
+      }
+    });
+
+    it("returns empty for no embeddings", () => {
+      const result = getObservationsWithEmbeddings(db, { limit: 10 });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toHaveLength(0);
       }
     });
   });

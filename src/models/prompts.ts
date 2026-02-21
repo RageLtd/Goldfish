@@ -132,6 +132,44 @@ export const SEARCH_MEMORY_TOOL: ToolDefinition = {
   },
 };
 
+export const SEARCH_MEMORY_FTS_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "search_memory_fts",
+    description:
+      "Search memories by keywords. Use for specific terms, error messages, file names, function names.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Concise search keywords (2-5 words)",
+        },
+      },
+      required: ["query"],
+    },
+  },
+};
+
+export const SEARCH_MEMORY_SEMANTIC_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "search_memory_semantic",
+    description:
+      "Search memories by meaning. Use for conceptual questions about how things work, why decisions were made, or finding similar past work.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Natural language description of what to find",
+        },
+      },
+      required: ["query"],
+    },
+  },
+};
+
 // ============================================================================
 // System Prompt
 // ============================================================================
@@ -181,11 +219,14 @@ Result: ${responseSummary}`;
 };
 
 export const buildSearchMemoryPrompt = (prompt: string): string => {
-  return `Extract search keywords from this user prompt. Call search_memory with a concise query (2-5 words) that captures the core topic.
+  return `You have two search tools. Default to search_memory_semantic unless the prompt contains specific exact terms.
 
-User prompt: ${prompt.slice(0, 500)}
+- search_memory_semantic (DEFAULT): Search by meaning. Use for most prompts — questions, descriptions, conceptual queries, "how does X work", "why did we choose Y", finding related past work.
+- search_memory_fts: Search by exact keywords. Use ONLY when the prompt contains specific file names, error messages, function names, or exact technical terms that must match literally.
 
-If the prompt is a greeting, small talk, or has no searchable technical content, do NOT call any tool.`;
+If the prompt is a greeting, small talk, or has no searchable content, do NOT call any tool.
+
+User prompt: ${prompt.slice(0, 500)}`;
 };
 
 export interface SummaryPromptInput {

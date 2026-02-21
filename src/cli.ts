@@ -14,6 +14,13 @@
  *   hook:cleanup    - SessionEnd hook (cleanup)
  *   worker          - Start HTTP worker service
  *   backfill        - Compute embeddings for observations without them
+ *   prune           - Remove stale, duplicate, and low-score observations
+ *   search          - Search observations or summaries
+ *   timeline        - Show recent activity timeline
+ *   decisions       - Show architectural decisions
+ *   find            - Find observations related to a file
+ *   observation     - Fetch a single observation by ID
+ *   health          - Check worker status
  *   version         - Show version
  */
 
@@ -48,6 +55,34 @@ const COMMANDS: Record<string, () => Promise<void>> = {
     const { main } = await import("./commands/backfill");
     await main();
   },
+  prune: async () => {
+    const { main } = await import("./commands/prune");
+    await main();
+  },
+  search: async () => {
+    const { searchMain } = await import("./commands/query");
+    await searchMain();
+  },
+  timeline: async () => {
+    const { timelineMain } = await import("./commands/query");
+    await timelineMain();
+  },
+  decisions: async () => {
+    const { decisionsMain } = await import("./commands/query");
+    await decisionsMain();
+  },
+  find: async () => {
+    const { findMain } = await import("./commands/query");
+    await findMain();
+  },
+  observation: async () => {
+    const { observationMain } = await import("./commands/query");
+    await observationMain();
+  },
+  health: async () => {
+    const { healthMain } = await import("./commands/query");
+    await healthMain();
+  },
   version: async () => {
     console.log(`goldfish v${pkg.version}`);
   },
@@ -66,11 +101,22 @@ Commands:
   hook:cleanup    SessionEnd hook - cleanup session
   worker          Start HTTP worker service
   backfill        Compute embeddings for observations without them
+  prune           Remove stale, duplicate, and low-score observations
+  search          Search observations or summaries
+  timeline        Show recent activity timeline
+  decisions       Show architectural decisions
+  find            Find observations related to a file
+  observation     Fetch a single observation by ID
+  health          Check worker status
   version         Show version
 
-Examples:
-  goldfish worker                    # Start the worker service
-  echo '{}' | goldfish hook:context  # Run context hook with stdin
+Query commands (require running worker):
+  goldfish search <query> [--type observations|summaries] [--concept ...] [--project ...] [--limit N]
+  goldfish timeline [--project ...] [--limit N] [--since ...]
+  goldfish decisions [--project ...] [--limit N] [--since ...]
+  goldfish find <file> [--limit N]
+  goldfish observation <id>
+  goldfish health
 `);
 };
 
