@@ -6,6 +6,7 @@
 import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import pkg from "../../package.json";
 import { DEFAULT_WORKER_PORT, serverUrl } from "../constants";
 import type { HookOutput } from "../types/hooks";
 import { fromPromise, fromTry } from "../types/result";
@@ -15,6 +16,7 @@ const WORKER_URL = serverUrl(parseInt(WORKER_PORT, 10));
 const HEALTH_TIMEOUT_MS = 1000;
 const WORKER_STARTUP_WAIT_MS = 5000;
 const WORKER_STARTUP_POLL_MS = 200;
+const PLUGIN_VERSION = pkg.version;
 
 // File-based logging (stdout is reserved for hook output)
 // Use CLAUDE_PLUGIN_ROOT if available, otherwise cwd
@@ -56,11 +58,37 @@ export const writeStdout = (output: HookOutput): void => {
 };
 
 /**
- * Checks if worker is healthy.
+ * Fetches the worker's version from /health.
+ * Returns the version string if reachable, null otherwise.
  */
-const isWorkerHealthy = async (): Promise<boolean> => {
+const getWorkerVersion = async (): Promise<string | null> => {
   const result = await fromPromise(
     fetch(`${WORKER_URL}/health`, {
+      signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+    }),
+  );
+  if (!result.ok || !result.value.ok) return null;
+  const jsonResult = await fromPromise(result.value.json());
+  if (!jsonResult.ok) return null;
+  const body = jsonResult.value as { version?: string };
+  return body.version ?? null;
+};
+
+/**
+ * Checks if worker is healthy (reachable).
+ */
+const isWorkerHealthy = async (): Promise<boolean> => {
+  return (await getWorkerVersion()) !== null;
+};
+
+/**
+ * Sends a shutdown request to the running worker.
+ * Returns true if the worker acknowledged the shutdown.
+ */
+const killWorker = async (): Promise<boolean> => {
+  const result = await fromPromise(
+    fetch(`${WORKER_URL}/shutdown`, {
+      method: "POST",
       signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
     }),
   );
@@ -131,11 +159,23 @@ const startWorker = (): void => {
 };
 
 /**
- * Ensures worker is running, starting it if needed.
+ * Ensures worker is running with the correct version, restarting if needed.
  */
 const ensureWorker = async (): Promise<void> => {
-  if (await isWorkerHealthy()) {
-    return;
+  const workerVersion = await getWorkerVersion();
+
+  if (workerVersion !== null) {
+    if (workerVersion === PLUGIN_VERSION) {
+      return; // Running and version matches
+    }
+    // Version mismatch — kill old worker
+    log(
+      "INFO",
+      `Version mismatch: worker=${workerVersion} plugin=${PLUGIN_VERSION}, restarting`,
+    );
+    await killWorker();
+    // Brief pause for port to free up
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
   // Start worker

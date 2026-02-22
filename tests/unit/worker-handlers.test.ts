@@ -26,6 +26,7 @@ import {
   handleQueueSummary,
   handleRetrieve,
   handleSearch,
+  handleShutdown,
   RETRIEVE_SAME_PROJECT_BONUS,
   type WorkerDeps,
 } from "../../src/worker/handlers";
@@ -68,6 +69,23 @@ describe("worker handlers", () => {
       expect(result.body.version).toBe("unknown");
       expect(result.body.uptimeSeconds).toBe(0);
       expect(result.body.pendingMessages).toBe(0);
+    });
+  });
+
+  describe("handleShutdown", () => {
+    it("returns shutting_down status and calls callback", async () => {
+      let called = false;
+      const onShutdown = () => {
+        called = true;
+      };
+
+      const result = await handleShutdown(deps, onShutdown);
+
+      expect(result.status).toBe(200);
+      expect(result.body.status).toBe("shutting_down");
+      // Callback is scheduled via setTimeout, wait for it
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(called).toBe(true);
     });
   });
 

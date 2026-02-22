@@ -277,6 +277,42 @@ describe("worker service router", () => {
     });
   });
 
+  describe("POST /shutdown", () => {
+    it("returns 501 when no onShutdown configured", async () => {
+      const request = new Request("http://localhost/shutdown", {
+        method: "POST",
+      });
+      const response = await router.handle(request);
+
+      expect(response.status).toBe(501);
+      const body = await response.json();
+      expect(body.error).toContain("Shutdown not configured");
+    });
+
+    it("returns 200 and triggers shutdown when configured", async () => {
+      let shutdownCalled = false;
+      const routerWithShutdown = createWorkerRouter({
+        deps: { db },
+        onShutdown: () => {
+          shutdownCalled = true;
+        },
+      });
+
+      const request = new Request("http://localhost/shutdown", {
+        method: "POST",
+      });
+      const response = await routerWithShutdown.handle(request);
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.status).toBe("shutting_down");
+
+      // Wait for setTimeout callback
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(shutdownCalled).toBe(true);
+    });
+  });
+
   describe("unknown routes", () => {
     it("returns 404 for unknown path", async () => {
       const request = new Request("http://localhost/unknown");

@@ -144,24 +144,8 @@ const start = async (): Promise<void> => {
       messageRouter = createMessageRouter({ processMessage });
       log("MessageRouter initialized");
 
-      // 6. Create HTTP router
-      const httpRouter = createWorkerRouter({
-        db,
-        router: messageRouter,
-        modelManager,
-        startedAt,
-        version: VERSION,
-      });
-
-      // 7. Start HTTP server
-      const server = Bun.serve({
-        port: PORT,
-        fetch: httpRouter.handle,
-      });
-
-      log(`Worker service running at http://127.0.0.1:${server.port}`);
-
       // Handle shutdown — stop owned llama-server processes before closing DB
+      let server: ReturnType<typeof Bun.serve>;
       const shutdown = async () => {
         log("Shutting down...");
         log(`Draining ${messageRouter.pending()} pending messages...`);
@@ -173,6 +157,26 @@ const start = async (): Promise<void> => {
         server.stop();
         process.exit(0);
       };
+
+      // 6. Create HTTP router (with shutdown callback for /shutdown endpoint)
+      const httpRouter = createWorkerRouter({
+        deps: {
+          db,
+          router: messageRouter,
+          modelManager,
+          startedAt,
+          version: VERSION,
+        },
+        onShutdown: shutdown,
+      });
+
+      // 7. Start HTTP server
+      server = Bun.serve({
+        port: PORT,
+        fetch: httpRouter.handle,
+      });
+
+      log(`Worker service running at http://127.0.0.1:${server.port}`);
 
       process.on("SIGINT", shutdown);
       process.on("SIGTERM", shutdown);

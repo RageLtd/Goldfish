@@ -21,6 +21,7 @@ import {
   handleQueueSummary,
   handleRetrieve,
   handleSearch,
+  handleShutdown,
   type QueueObservationInput,
   type QueueSummaryInput,
   type RetrieveInput,
@@ -332,14 +333,35 @@ const routes: readonly Route[] = [
   },
 ];
 
+export interface WorkerRouterOptions {
+  readonly deps: WorkerDeps;
+  readonly onShutdown?: () => void;
+}
+
 /**
  * Creates a worker router with the given dependencies.
  */
-export const createWorkerRouter = (deps: WorkerDeps): WorkerRouter => {
+export const createWorkerRouter = (
+  depsOrOptions: WorkerDeps | WorkerRouterOptions,
+): WorkerRouter => {
+  // Support both old signature (just deps) and new (options object)
+  const isOptions = "deps" in depsOrOptions;
+  const deps = isOptions ? depsOrOptions.deps : depsOrOptions;
+  const onShutdown = isOptions ? depsOrOptions.onShutdown : undefined;
+
   const handle = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
+
+    // Handle shutdown separately (needs callback, not just deps)
+    if (path === "/shutdown" && method === "POST") {
+      if (!onShutdown) {
+        return jsonResponse(501, { error: "Shutdown not configured" });
+      }
+      const result = await handleShutdown(deps, onShutdown);
+      return jsonResponse(result.status, result.body);
+    }
 
     // Find matching route
     const route = routes.find((r) => r.path === path);

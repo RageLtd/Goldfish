@@ -1178,6 +1178,22 @@ export const handleBackfill = async (
 };
 
 /**
+ * Graceful shutdown endpoint.
+ * Returns immediately, then triggers shutdown via callback.
+ */
+export const handleShutdown = async (
+  _deps: WorkerDeps,
+  onShutdown: () => void,
+): Promise<HandlerResponse<{ readonly status: string }>> => {
+  // Schedule shutdown after response is sent
+  setTimeout(onShutdown, 50);
+  return {
+    status: 200,
+    body: { status: "shutting_down" },
+  };
+};
+
+/**
  * Check how many observations still lack embeddings.
  */
 export const handleBackfillStatus = async (
