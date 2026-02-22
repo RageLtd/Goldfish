@@ -219,21 +219,12 @@ Result: ${responseSummary}`;
 };
 
 export const buildSearchMemoryPrompt = (prompt: string): string => {
-  return `You decide whether a user prompt needs memory retrieval.
+  return `If the user prompt is a technical question, call search_memory_semantic. If it is a greeting or confirmation, respond normally.
 
-Call search_memory_semantic ONLY when the prompt references:
-- Past work, prior decisions, or previous sessions ("what did we decide?", "continue the refactoring")
-- How current code works ("how does the auth handler work?", "what does this function do?")
-- Why something was built a certain way ("why did we choose SQLite?")
-- Past bugs or fixes ("what was the bug in the parser?")
-
-Do NOT call any tool for:
-- New task instructions ("add a logout button", "fix this error", "refactor the handler")
-- Greetings, confirmations, or small talk ("yes", "looks good", "hello")
-- Tool/service queries ("can you reach context7?", "run the tests")
-- General knowledge questions not about this project
-
-When in doubt, do NOT search. Only search when the user is clearly asking about past context or how existing code works.
+Example — user asks "how does auth work?", you call:
+<tool_call>
+{"name": "search_memory_semantic", "arguments": {"query": "how does auth work"}}
+</tool_call>
 
 User prompt: ${prompt.slice(0, 500)}`;
 };

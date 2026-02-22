@@ -3,6 +3,9 @@
  * Pure functions that take dependencies and input, return response objects.
  */
 
+const isDev = process.env.NODE_ENV === "development";
+const debug = isDev ? (...args: unknown[]) => console.debug(...args) : () => {};
+
 import type { Database } from "bun:sqlite";
 import {
   createSession,
@@ -277,15 +280,16 @@ export const semanticSearch = async (
   }
 
   const queryEmbedding = embeddingResult.value;
-  const candidatesResult = getObservationsWithEmbeddings(db, {
-    limit: limit * 5,
-  });
+  const candidatesResult = getObservationsWithEmbeddings(db, {});
 
   if (!candidatesResult.ok) {
     return candidatesResult;
   }
 
   const candidates = candidatesResult.value;
+  debug(
+    `[semantic] candidates=${candidates.length} query="${query.slice(0, 60)}"`,
+  );
 
   const scored = candidates.map((c) => {
     const similarity = cosineSimilarity(queryEmbedding, c.embedding);
@@ -296,9 +300,20 @@ export const semanticSearch = async (
 
   scored.sort((a, b) => b.score - a.score);
 
+  if (isDev && scored.length > 0) {
+    const top5 = scored
+      .slice(0, 5)
+      .map((s) => `${s.score.toFixed(3)}`)
+      .join(", ");
+    debug(
+      `[semantic] top scores: [${top5}] min_relevance=${RETRIEVE_MIN_RELEVANCE}`,
+    );
+  }
+
   const filtered = scored
     .filter((s) => s.score >= RETRIEVE_MIN_RELEVANCE)
     .slice(0, limit);
+  debug(`[semantic] filtered=${filtered.length} (limit=${limit})`);
 
   // Convert back to Observation shape
   const observations: Observation[] = filtered.map((s) => ({
@@ -521,7 +536,12 @@ export const handleRetrieve = async (
 ): Promise<HandlerResponse> => {
   const { prompt, project, limit, sessionId } = input;
 
+  debug(
+    `[retrieve] called prompt="${prompt?.slice(0, 80)}" project=${project} sessionId=${sessionId}`,
+  );
+
   if (!prompt) {
+    debug("[retrieve] EXIT: no prompt");
     return {
       status: 400,
       body: { error: "prompt is required" },
@@ -533,6 +553,7 @@ export const handleRetrieve = async (
     const sessionResult = getSessionByClaudeId(deps.db, sessionId);
     if (!sessionResult.ok || !sessionResult.value) {
       // Session not yet created — this is definitely the first prompt
+      debug(`[retrieve] EXIT: session not found for ${sessionId}`);
       return {
         status: 200,
         body: { context: null, observationCount: 0, typeCounts: {} },
@@ -541,6 +562,7 @@ export const handleRetrieve = async (
   }
 
   if (!deps.modelManager) {
+    debug("[retrieve] EXIT: no modelManager");
     return {
       status: 503,
       body: { error: "Model manager unavailable" },
@@ -555,7 +577,7 @@ export const handleRetrieve = async (
         {
           role: "system",
           content:
-            "You decide whether to search project memory. Only call search_memory_semantic when the prompt needs past context or code understanding. Otherwise respond without calling any tool.",
+            "You are a memory retrieval assistant. When the user asks a technical question, call the search_memory_semantic tool. Only skip the tool for greetings or confirmations.",
         },
         { role: "user", content: searchPrompt },
       ],
@@ -563,6 +585,9 @@ export const handleRetrieve = async (
     ),
   );
   if (!generateResult.ok) {
+    debug(
+      `[retrieve] EXIT: model generation failed: ${generateResult.error.message}`,
+    );
     return {
       status: 500,
       body: {
@@ -571,6 +596,7 @@ export const handleRetrieve = async (
     };
   }
   const modelOutput = generateResult.value;
+  debug(`[retrieve] modelOutput="${modelOutput.slice(0, 200)}"`);
 
   // Parse the smart tool call (fts, semantic, or legacy)
   const toolCall = parseSmartSearchToolCall(modelOutput);
@@ -579,6 +605,7 @@ export const handleRetrieve = async (
   }
   if (!toolCall) {
     // Model decided prompt is not searchable (greeting, small talk, etc.)
+    debug("[retrieve] EXIT: no tool call parsed from model output");
     return {
       status: 200,
       body: {

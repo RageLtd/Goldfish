@@ -739,7 +739,7 @@ export const getObservationsForPruning = (
  */
 export const getObservationsWithEmbeddings = (
   db: Database,
-  input: { readonly limit: number },
+  input: { readonly limit?: number },
 ): Result<
   readonly {
     readonly id: number;
@@ -772,9 +772,9 @@ export const getObservationsWithEmbeddings = (
          FROM observations
          WHERE embedding IS NOT NULL
          ORDER BY created_at_epoch DESC
-         LIMIT ?`,
+         ${input.limit != null ? "LIMIT ?" : ""}`,
       )
-      .all(input.limit);
+      .all(...(input.limit != null ? [input.limit] : []));
 
     return rows.map((row) => ({
       id: row.id,
