@@ -113,7 +113,7 @@ get_llama_platform_suffix() {
 # ============================================================================
 
 phase1_goldfish() {
-    local binary="$PLUGIN_ROOT/bin/goldfish"
+    local binary="${BIN_DIR}/goldfish"
     local latest_tag
     latest_tag=$(get_latest_tag)
     local stored_version
@@ -126,12 +126,12 @@ phase1_goldfish() {
 
     echo "[goldfish] Downloading goldfish binary (${PLATFORM})..." >&2
 
-    mkdir -p "$PLUGIN_ROOT/bin"
+    mkdir -p "$BIN_DIR"
     local url="https://github.com/${REPO}/releases/latest/download/goldfish-${PLATFORM}"
     download "$url" "$binary"
     chmod +x "$binary"
 
-    # Store version (shared across phases 1+2)
+    # Store version
     mkdir -p "$DATA_DIR"
     echo "$latest_tag" > "$VERSION_FILE"
 

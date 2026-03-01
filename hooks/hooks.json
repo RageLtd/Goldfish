@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:context"
+            "command": "${HOME}/.goldfish/bin/goldfish hook:context"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:new"
+            "command": "${HOME}/.goldfish/bin/goldfish hook:new"
           }
         ]
       }
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:save"
+            "command": "${HOME}/.goldfish/bin/goldfish hook:save"
           }
         ]
       }
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:summary"
+            "command": "${HOME}/.goldfish/bin/goldfish hook:summary"
           }
         ]
       }
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/goldfish hook:cleanup"
+            "command": "${HOME}/.goldfish/bin/goldfish hook:cleanup"
           }
         ]
       }

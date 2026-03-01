@@ -100,10 +100,12 @@ const killWorker = async (): Promise<boolean> => {
  * Handles both development (bun run) and compiled binary cases.
  */
 const getWorkerBinPath = (): string => {
-  // Check if CLAUDE_PLUGIN_ROOT is set (running as plugin)
-  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-  if (pluginRoot) {
-    return join(pluginRoot, "bin", "goldfish");
+  // Primary: ~/.goldfish/bin/goldfish (canonical install location)
+  const homeDir = process.env.HOME || "";
+  const homeBin = join(homeDir, ".goldfish", "bin", "goldfish");
+  const homeCheck = fromTry(() => Bun.file(homeBin).size > 0);
+  if (homeCheck.ok && homeCheck.value) {
+    return homeBin;
   }
 
   // Fallback: use Bun.main which gives us the actual script path
@@ -111,20 +113,6 @@ const getWorkerBinPath = (): string => {
   const mainPath = Bun.main;
   if (mainPath && !mainPath.startsWith("/$bunfs")) {
     return mainPath;
-  }
-
-  // Last resort: check common locations
-  const homeDir = process.env.HOME || "";
-  const possiblePaths = [
-    join(homeDir, ".goldfish", "bin", "goldfish"),
-    join(process.cwd(), "plugin", "bin", "goldfish"),
-  ];
-
-  for (const p of possiblePaths) {
-    const check = fromTry(() => Bun.file(p).size > 0);
-    if (check.ok && check.value) {
-      return p;
-    }
   }
 
   // Give up - worker won't auto-start but hooks will still work gracefully
