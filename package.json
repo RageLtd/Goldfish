@@ -1,6 +1,6 @@
 {
 	"name": "goldfish",
-	"version": "3.4.4",
+	"version": "3.4.5",
 	"module": "src/index.ts",
 	"type": "module",
 	"private": true,

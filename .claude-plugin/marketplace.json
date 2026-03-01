@@ -10,11 +10,11 @@
   "plugins": [
     {
       "name": "goldfish",
-      "version": "3.4.4",
+      "version": "3.4.5",
       "source": {
         "source": "github",
         "repo": "RageLtd/Goldfish",
-        "ref": "v3.4.4"
+        "ref": "v3.4.5"
       },
       "description": "Claude Code plugin for persistent agent memory — because your AI shouldn't have the memory of a goldfish."
     }
