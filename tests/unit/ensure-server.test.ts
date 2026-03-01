@@ -22,14 +22,17 @@ describe("getPlatformSuffix", () => {
     expect(result).toEqual({ ok: true, value: "macos-x64" });
   });
 
-  it("maps linux-arm64 to linux-aarch64", () => {
-    const result = getPlatformSuffix({ platform: "linux", arch: "arm64" });
-    expect(result).toEqual({ ok: true, value: "linux-aarch64" });
+  it("maps linux-x64 to ubuntu-x64", () => {
+    const result = getPlatformSuffix({ platform: "linux", arch: "x64" });
+    expect(result).toEqual({ ok: true, value: "ubuntu-x64" });
   });
 
-  it("maps linux-x64 to linux-x64", () => {
-    const result = getPlatformSuffix({ platform: "linux", arch: "x64" });
-    expect(result).toEqual({ ok: true, value: "linux-x64" });
+  it("returns error for linux-arm64 (unsupported)", () => {
+    const result = getPlatformSuffix({ platform: "linux", arch: "arm64" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain("Unsupported platform");
+    }
   });
 
   it("returns error for unsupported platform", () => {

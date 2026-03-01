@@ -17,7 +17,7 @@ Show chronological activity from the goldfish memory database.
 ## CLI
 
 ```bash
-goldfish timeline [--project <name>] [--limit N] [--since <filter>]
+~/.goldfish/bin/goldfish timeline [--project <name>] [--limit N] [--since <filter>]
 ```
 
 Defaults to current project. Since filters: `today`, `yesterday`, `7d`, `30d`, `2w`, ISO date, epoch.
@@ -25,9 +25,9 @@ Defaults to current project. Since filters: `today`, `yesterday`, `7d`, `30d`, `
 ## Examples
 
 ```bash
-goldfish timeline --since today
-goldfish timeline --since 7d --limit 30
-goldfish timeline --project myapp --since yesterday
+~/.goldfish/bin/goldfish timeline --since today
+~/.goldfish/bin/goldfish timeline --since 7d --limit 30
+~/.goldfish/bin/goldfish timeline --project myapp --since yesterday
 ```
 
 ## Display Rules

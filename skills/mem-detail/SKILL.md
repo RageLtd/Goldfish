@@ -16,7 +16,7 @@ Fetch the full content of a specific observation from the goldfish memory databa
 ## CLI
 
 ```bash
-goldfish observation <id>
+~/.goldfish/bin/goldfish observation <id>
 ```
 
 Returns the full formatted observation including title, narrative, facts, concepts, and files.
@@ -24,8 +24,8 @@ Returns the full formatted observation including title, narrative, facts, concep
 ## Examples
 
 ```bash
-goldfish observation 42
-goldfish observation 2175
+~/.goldfish/bin/goldfish observation 42
+~/.goldfish/bin/goldfish observation 2175
 ```
 
 ## Display Rules

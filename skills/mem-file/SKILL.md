@@ -17,7 +17,7 @@ Find observations related to a specific file from the goldfish memory database.
 ## CLI
 
 ```bash
-goldfish find <file> [--limit N]
+~/.goldfish/bin/goldfish find <file> [--limit N]
 ```
 
 Searches both `filesRead` and `filesModified` arrays in observations.
@@ -25,9 +25,9 @@ Searches both `filesRead` and `filesModified` arrays in observations.
 ## Examples
 
 ```bash
-goldfish find src/auth.ts
-goldfish find handlers.ts --limit 20
-goldfish find package.json
+~/.goldfish/bin/goldfish find src/auth.ts
+~/.goldfish/bin/goldfish find handlers.ts --limit 20
+~/.goldfish/bin/goldfish find package.json
 ```
 
 ## Display Rules

@@ -28,8 +28,7 @@ interface PlatformKey {
 const PLATFORM_SUFFIX_MAP: Record<string, string> = {
   "darwin-arm64": "macos-arm64",
   "darwin-x64": "macos-x64",
-  "linux-arm64": "linux-aarch64",
-  "linux-x64": "linux-x64",
+  "linux-x64": "ubuntu-x64",
 };
 
 export const getPlatformSuffix = (key: PlatformKey): Result<string> => {

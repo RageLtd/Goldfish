@@ -17,7 +17,7 @@ Retrieve architectural and design decisions from the goldfish memory database.
 ## CLI
 
 ```bash
-goldfish decisions [--project <name>] [--limit N] [--since <filter>]
+~/.goldfish/bin/goldfish decisions [--project <name>] [--limit N] [--since <filter>]
 ```
 
 Defaults to current project. Since filters: `today`, `yesterday`, `7d`, `30d`, `2w`, ISO date, epoch.
@@ -25,16 +25,16 @@ Defaults to current project. Since filters: `today`, `yesterday`, `7d`, `30d`, `
 ### Fetch Full Decision Details
 
 ```bash
-goldfish observation <id>
+~/.goldfish/bin/goldfish observation <id>
 ```
 
 ## Examples
 
 ```bash
-goldfish decisions
-goldfish decisions --since 7d
-goldfish decisions --project myapp --limit 10
-goldfish observation 42
+~/.goldfish/bin/goldfish decisions
+~/.goldfish/bin/goldfish decisions --since 7d
+~/.goldfish/bin/goldfish decisions --project myapp --limit 10
+~/.goldfish/bin/goldfish observation 42
 ```
 
 ## Display Rules
@@ -47,6 +47,6 @@ goldfish observation 42
 ## Example Workflow
 
 1. User asks: "Should we use Redis or in-memory caching?"
-2. Check existing decisions: `goldfish decisions`
+2. Check existing decisions: `~/.goldfish/bin/goldfish decisions`
 3. If a caching decision exists, reference it
 4. If not, proceed — the decision will be recorded automatically

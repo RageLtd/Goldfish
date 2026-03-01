@@ -100,8 +100,7 @@ get_llama_platform_suffix() {
     case "${OS}-${ARCH}" in
         darwin-arm64) echo "macos-arm64" ;;
         darwin-x64)   echo "macos-x64" ;;
-        linux-arm64)  echo "linux-aarch64" ;;
-        linux-x64)    echo "linux-x64" ;;
+        linux-x64)    echo "ubuntu-x64" ;;
         *)
             echo "[goldfish] ERROR: No llama.cpp release for ${OS}-${ARCH}" >&2
             exit 1

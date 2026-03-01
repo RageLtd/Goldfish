@@ -18,28 +18,28 @@ Search the goldfish database for observations and summaries from past work.
 ### Search Observations
 
 ```bash
-goldfish search <query> [--type observations|summaries] [--concept decision|bugfix|feature|refactor|discovery|change] [--project <name>] [--limit N]
+~/.goldfish/bin/goldfish search <query> [--type observations|summaries] [--concept decision|bugfix|feature|refactor|discovery|change] [--project <name>] [--limit N]
 ```
 
 Examples:
 ```bash
-goldfish search "authentication flow"
-goldfish search "database migration" --concept bugfix
-goldfish search "API endpoint" --type summaries --limit 5
+~/.goldfish/bin/goldfish search "authentication flow"
+~/.goldfish/bin/goldfish search "database migration" --concept bugfix
+~/.goldfish/bin/goldfish search "API endpoint" --type summaries --limit 5
 ```
 
 ### Get Recent Context
 
 ```bash
-goldfish timeline [--project <name>] [--limit N] [--since <filter>]
+~/.goldfish/bin/goldfish timeline [--project <name>] [--limit N] [--since <filter>]
 ```
 
 Since filters: `today`, `yesterday`, `7d`, `30d`, `2w`, ISO date, epoch.
 
 Examples:
 ```bash
-goldfish timeline --since today
-goldfish timeline --since 7d --limit 30
+~/.goldfish/bin/goldfish timeline --since today
+~/.goldfish/bin/goldfish timeline --since 7d --limit 30
 ```
 
 ## Display Rules
@@ -52,6 +52,6 @@ goldfish timeline --since 7d --limit 30
 
 Context uses two tiers:
 1. **Index** (~20 tokens/observation): titles, types, token estimates
-2. **Detail**: full observation fetched by ID via `goldfish observation <id>`
+2. **Detail**: full observation fetched by ID via `~/.goldfish/bin/goldfish observation <id>`
 
 Fetch details only when you need implementation specifics or rationale.
