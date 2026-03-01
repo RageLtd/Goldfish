@@ -154,11 +154,22 @@ const downloadAndExtract = async (
     [
       "sh",
       "-c",
-      `cp "${serverBin}" "${sourceDir}"/*.dylib "${sourceDir}"/*.so "${binaryDir}/" 2>/dev/null; chmod +x "${binaryDir}/llama-server"`,
+      `cp "${serverBin}" "${sourceDir}"/*.dylib "${sourceDir}"/*.so "${sourceDir}"/*.so.* "${binaryDir}/" 2>/dev/null; chmod +x "${binaryDir}/llama-server"`,
     ],
     { stdout: "inherit", stderr: "inherit" },
   );
   await copyProc.exited;
+
+  // Create versioned soname symlinks (e.g. libmtmd.so.0 -> libmtmd.so)
+  const symlinkProc = Bun.spawn(
+    [
+      "sh",
+      "-c",
+      `for lib in "${binaryDir}"/*.so; do [ -f "$lib" ] || continue; soname=$(objdump -p "$lib" 2>/dev/null | awk '/SONAME/{print $2}'); if [ -n "$soname" ] && [ ! -e "${binaryDir}/$soname" ]; then ln -s "$(basename "$lib")" "${binaryDir}/$soname"; fi; done`,
+    ],
+    { stdout: "inherit", stderr: "inherit" },
+  );
+  await symlinkProc.exited;
 
   // Cleanup temp files
   Bun.spawn(["rm", "-rf", tmpTar, tmpDir], {

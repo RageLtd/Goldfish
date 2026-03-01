@@ -200,7 +200,17 @@ phase2_llama_server() {
     # Copy shared libraries (.dylib on macOS, .so on Linux) from same directory
     local server_dir
     server_dir=$(dirname "$server_bin")
-    find "$server_dir" \( -name "*.dylib" -o -name "*.so" \) -exec cp {} "${BIN_DIR}/" \;
+    find "$server_dir" \( -name "*.dylib" -o -name "*.so" -o -name "*.so.*" \) -exec cp {} "${BIN_DIR}/" \;
+
+    # Create versioned soname symlinks (e.g. libmtmd.so.0 -> libmtmd.so)
+    for lib in "${BIN_DIR}"/*.so; do
+        [ -f "$lib" ] || continue
+        local soname
+        soname=$(objdump -p "$lib" 2>/dev/null | awk '/SONAME/{print $2}')
+        if [ -n "$soname" ] && [ ! -e "${BIN_DIR}/${soname}" ]; then
+            ln -s "$(basename "$lib")" "${BIN_DIR}/${soname}"
+        fi
+    done
 
     rm -rf "$tmp_tar" "$tmp_extract"
 
