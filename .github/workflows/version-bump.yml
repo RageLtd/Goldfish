@@ -147,6 +147,16 @@ jobs:
             dist/goldfish-linux-x64
           generate_release_notes: true
 
+      - name: Notify marketplace
+        env:
+          GH_TOKEN: ${{ secrets.MARKETPLACE_PAT }}
+          VERSION: ${{ needs.version-bump.outputs.new_version }}
+        run: |
+          gh api repos/RageLtd/claude-plugins/dispatches \
+            -f event_type=plugin-release \
+            -f "client_payload[plugin_name]=goldfish" \
+            -f "client_payload[version]=$VERSION"
+
       - name: Release Summary
         run: |
           echo "## Release Published" >> $GITHUB_STEP_SUMMARY
