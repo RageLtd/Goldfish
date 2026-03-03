@@ -177,8 +177,6 @@ const updatePackageJson = (newVersion: string): void => {
 // Plugin JSON files that contain a "version" field to keep in sync
 const PLUGIN_VERSION_FILES = [".claude-plugin/plugin.json"];
 
-const MARKETPLACE_FILE = ".claude-plugin/marketplace.json";
-
 const updatePluginVersionFiles = (newVersion: string): void => {
   const cwd = process.cwd();
 
@@ -189,32 +187,13 @@ const updatePluginVersionFiles = (newVersion: string): void => {
     json.version = newVersion;
     writeFileSync(filePath, `${JSON.stringify(json, null, "  ")}\n`);
   }
-
-  // marketplace.json has version and source.ref nested inside plugins[]
-  const marketplacePath = join(cwd, MARKETPLACE_FILE);
-  const marketplaceContent = readFileSync(marketplacePath, "utf-8");
-  const marketplace = JSON.parse(marketplaceContent);
-  for (const plugin of marketplace.plugins) {
-    plugin.version = newVersion;
-    if (plugin.source?.source === "github") {
-      plugin.source.ref = `v${newVersion}`;
-    }
-  }
-  writeFileSync(
-    marketplacePath,
-    `${JSON.stringify(marketplace, null, "  ")}\n`,
-  );
 };
 
 // ============================================================================
 // Release Actions
 // ============================================================================
 
-const VERSIONED_FILES = [
-  "package.json",
-  ...PLUGIN_VERSION_FILES,
-  MARKETPLACE_FILE,
-];
+const VERSIONED_FILES = ["package.json", ...PLUGIN_VERSION_FILES];
 
 const createCommit = (version: string): void => {
   exec(`git add ${VERSIONED_FILES.join(" ")}`);
