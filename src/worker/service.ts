@@ -14,8 +14,11 @@ import {
   handleFindByFile,
   handleGetContext,
   handleGetDecisions,
+  handleGetNeighbors,
   handleGetObservation,
   handleGetTimeline,
+  handleGraphBackfill,
+  handleGraphStats,
   handleHealth,
   handleQueueObservation,
   handleQueueSummary,
@@ -305,6 +308,36 @@ const handleObservationByIdRoute = async (
   return jsonResponse(result.status, result.body);
 };
 
+const handleGraphNeighborsRoute = async (
+  deps: WorkerDeps,
+  request: Request,
+): Promise<Response> => {
+  const params = getSearchParams(request);
+  const id = parseInt(params.get("id") || "0", 10);
+  if (!id || id <= 0) {
+    return jsonResponse(400, { error: "Valid id required" });
+  }
+  const depth = parseInt(params.get("depth") || "1", 10);
+  const result = await handleGetNeighbors(deps, { id, depth });
+  return jsonResponse(result.status, result.body);
+};
+
+const handleGraphStatsRoute = async (
+  deps: WorkerDeps,
+  _request: Request,
+): Promise<Response> => {
+  const result = await handleGraphStats(deps);
+  return jsonResponse(result.status, result.body);
+};
+
+const handleGraphBackfillRoute = async (
+  deps: WorkerDeps,
+  _request: Request,
+): Promise<Response> => {
+  const result = await handleGraphBackfill(deps);
+  return jsonResponse(result.status, result.body);
+};
+
 // ============================================================================
 // Router
 // ============================================================================
@@ -330,6 +363,17 @@ const routes: readonly Route[] = [
     method: "GET",
     path: "/backfill/status",
     handler: handleBackfillStatusRoute,
+  },
+  {
+    method: "GET",
+    path: "/graph/neighbors",
+    handler: handleGraphNeighborsRoute,
+  },
+  { method: "GET", path: "/graph/stats", handler: handleGraphStatsRoute },
+  {
+    method: "POST",
+    path: "/graph/backfill",
+    handler: handleGraphBackfillRoute,
   },
 ];
 

@@ -101,13 +101,21 @@ export interface PruneResult {
   readonly lowScore: number;
   readonly total: number;
   readonly deleted: number;
+  readonly deletedIds: readonly number[];
 }
 
 export const runPrune = (db: Database, options: PruneOptions): PruneResult => {
   const candidatesResult = getObservationsForPruning(db);
   if (!candidatesResult.ok) {
     log(`Error fetching observations: ${candidatesResult.error.message}`);
-    return { aged: 0, duplicates: 0, lowScore: 0, total: 0, deleted: 0 };
+    return {
+      aged: 0,
+      duplicates: 0,
+      lowScore: 0,
+      total: 0,
+      deleted: 0,
+      deletedIds: [],
+    };
   }
 
   const candidates = candidatesResult.value;
@@ -199,6 +207,7 @@ export const runPrune = (db: Database, options: PruneOptions): PruneResult => {
       lowScore: lowScoreIds.length,
       total,
       deleted: 0,
+      deletedIds: [],
     };
   }
 
@@ -211,6 +220,7 @@ export const runPrune = (db: Database, options: PruneOptions): PruneResult => {
       lowScore: lowScoreIds.length,
       total,
       deleted: 0,
+      deletedIds: [],
     };
   }
 
@@ -220,6 +230,7 @@ export const runPrune = (db: Database, options: PruneOptions): PruneResult => {
     lowScore: lowScoreIds.length,
     total,
     deleted: deleteResult.value,
+    deletedIds: allIds,
   };
 };
 

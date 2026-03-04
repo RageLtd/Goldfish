@@ -175,7 +175,9 @@ phase2_llama_server() {
     local tag_number="${latest_llama_tag}"
     local url="https://github.com/${LLAMA_REPO}/releases/download/${latest_llama_tag}/llama-${tag_number}-bin-${platform_suffix}.tar.gz"
     local tmp_tar
-    tmp_tar=$(mktemp "${TMPDIR:-/tmp}/llama-server-XXXXXX.tar.gz")
+    tmp_tar=$(mktemp "${TMPDIR:-/tmp}/llama-server-XXXXXX")
+    mv "$tmp_tar" "${tmp_tar}.tar.gz"
+    tmp_tar="${tmp_tar}.tar.gz"
 
     download "$url" "$tmp_tar"
 

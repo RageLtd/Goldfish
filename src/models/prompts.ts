@@ -171,6 +171,91 @@ export const SEARCH_MEMORY_SEMANTIC_TOOL: ToolDefinition = {
 };
 
 // ============================================================================
+// Knowledge Graph Tool Definitions
+// ============================================================================
+
+export const QUERY_GRAPH_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "query_graph",
+    description:
+      "Get the graph neighborhood of an observation. Returns connected observations and their edge types.",
+    parameters: {
+      type: "object",
+      properties: {
+        observation_id: {
+          type: "number",
+          description: "The ID of the observation to query",
+        },
+      },
+      required: ["observation_id"],
+    },
+  },
+};
+
+export const CLASSIFY_RELATIONSHIP_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "classify_relationship",
+    description: "Classify relationships between observations",
+    parameters: {
+      type: "object",
+      properties: {
+        relationships: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              source_id: {
+                type: "number",
+                description: "Source observation ID",
+              },
+              target_id: {
+                type: "number",
+                description: "Target observation ID",
+              },
+              relationship: {
+                type: "string",
+                enum: [
+                  "caused-by",
+                  "supersedes",
+                  "implements",
+                  "relates-to",
+                  "none",
+                ],
+                description: "The type of relationship",
+              },
+              direction: {
+                type: "string",
+                enum: ["a-to-b", "b-to-a", "bidirectional"],
+                description: "Direction of the relationship",
+              },
+              strength: {
+                type: "number",
+                description: "Confidence score 0-1",
+              },
+              explanation: {
+                type: "string",
+                description: "One sentence explanation of the relationship",
+              },
+            },
+            required: [
+              "source_id",
+              "target_id",
+              "relationship",
+              "direction",
+              "strength",
+            ],
+          },
+          description: "List of classified relationships",
+        },
+      },
+      required: ["relationships"],
+    },
+  },
+};
+
+// ============================================================================
 // System Prompt
 // ============================================================================
 
@@ -233,6 +318,53 @@ export interface SummaryPromptInput {
   readonly lastUserMessage: string;
   readonly lastAssistantMessage?: string;
 }
+
+// ============================================================================
+// Graph Enrichment Prompt
+// ============================================================================
+
+export interface GraphEnrichmentObservation {
+  readonly id: number;
+  readonly type: string;
+  readonly title: string;
+  readonly narrative: string;
+}
+
+/**
+ * Builds system + user prompts for LLM-based edge classification (Tier 3).
+ * The model receives a source observation and candidates, then uses
+ * query_graph to inspect existing connections before calling
+ * classify_relationship.
+ */
+export const buildGraphEnrichmentPrompt = (
+  source: GraphEnrichmentObservation,
+  candidates: readonly GraphEnrichmentObservation[],
+): { readonly system: string; readonly user: string } => {
+  const system = `You classify semantic relationships between developer observations in a knowledge graph.
+
+You have two tools:
+1. query_graph — look up existing graph neighbors for an observation (max 2 calls)
+2. classify_relationship — classify relationships between the source and candidates (call exactly once)
+
+Valid relationships: caused-by, supersedes, implements, relates-to, none
+Valid directions: a-to-b (source→target), b-to-a (target→source), bidirectional
+Strength: 0-1 confidence score. Only include relationships with strength >= 0.5.
+
+First optionally query the graph for context, then classify.`;
+
+  const formatObs = (obs: GraphEnrichmentObservation): string =>
+    `[${obs.id}] (${obs.type}) ${obs.title}\n  ${obs.narrative.slice(0, 200)}`;
+
+  const user = `Source observation:
+${formatObs(source)}
+
+Candidate observations:
+${candidates.map(formatObs).join("\n\n")}
+
+Classify the relationships between the source [${source.id}] and each candidate. Use query_graph first if you need context about existing connections.`;
+
+  return { system, user };
+};
 
 export const buildLocalSummaryPrompt = (input: SummaryPromptInput): string => {
   return `Summarize what was accomplished. Call the create_summary tool with relevant fields.

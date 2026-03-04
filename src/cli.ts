@@ -14,6 +14,9 @@
  *   hook:cleanup    - SessionEnd hook (cleanup)
  *   worker          - Start HTTP worker service
  *   backfill        - Compute embeddings for observations without them
+ *   graph:backfill  - Create edges for observations with embeddings but no edges
+ *   graph:stats     - Show knowledge graph statistics
+ *   graph:show      - Show observation neighborhood in the graph
  *   prune           - Remove stale, duplicate, and low-score observations
  *   search          - Search observations or summaries
  *   timeline        - Show recent activity timeline
@@ -55,6 +58,10 @@ const COMMANDS: Record<string, () => Promise<void>> = {
     const { main } = await import("./commands/backfill");
     await main();
   },
+  "graph:backfill": async () => {
+    const { main } = await import("./commands/graph");
+    await main();
+  },
   prune: async () => {
     const { main } = await import("./commands/prune");
     await main();
@@ -83,6 +90,14 @@ const COMMANDS: Record<string, () => Promise<void>> = {
     const { healthMain } = await import("./commands/query");
     await healthMain();
   },
+  "graph:stats": async () => {
+    const { graphStatsMain } = await import("./commands/query");
+    await graphStatsMain();
+  },
+  "graph:show": async () => {
+    const { graphShowMain } = await import("./commands/query");
+    await graphShowMain();
+  },
   version: async () => {
     console.log(`goldfish v${pkg.version}`);
   },
@@ -101,6 +116,9 @@ Commands:
   hook:cleanup    SessionEnd hook - cleanup session
   worker          Start HTTP worker service
   backfill        Compute embeddings for observations without them
+  graph:backfill  Create edges for observations with embeddings but no edges
+  graph:stats     Show knowledge graph statistics
+  graph:show      Show observation neighborhood in the graph
   prune           Remove stale, duplicate, and low-score observations
   search          Search observations or summaries
   timeline        Show recent activity timeline
@@ -117,6 +135,8 @@ Query commands (require running worker):
   goldfish find <file> [--limit N]
   goldfish observation <id>
   goldfish health
+  goldfish graph:stats
+  goldfish graph:show <id>
 `);
 };
 

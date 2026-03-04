@@ -180,15 +180,13 @@ describe("worker service router", () => {
   });
 
   describe("GET /search", () => {
-    it("searches observations", async () => {
+    it("returns 503 for observations without graphManager", async () => {
       const request = new Request(
         "http://localhost/search?query=auth&type=observations&limit=10",
       );
       const response = await router.handle(request);
 
-      expect(response.status).toBe(200);
-      const body = await response.json();
-      expect(Array.isArray(body.results)).toBe(true);
+      expect(response.status).toBe(503);
     });
 
     it("returns 400 for missing query param", async () => {

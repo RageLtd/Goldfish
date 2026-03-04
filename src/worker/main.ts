@@ -15,6 +15,7 @@ import {
   DEFAULT_WORKER_PORT,
 } from "../constants";
 import { createDatabase, runMigrations } from "../db/index";
+import { createGraphManager } from "../graph/index";
 import { ensureLlamaServer } from "../models/ensure-server";
 import { createModelManager } from "../models/manager";
 import {
@@ -83,7 +84,16 @@ const start = async (): Promise<void> => {
       runMigrations(db);
       log("Database initialized");
 
-      // 2. Ensure llama-server binary is available (auto-download if missing)
+      // 2. Hydrate in-memory knowledge graph from SQLite
+      const graphManager = createGraphManager();
+      const hydrateResult = graphManager.hydrate(db);
+      if (hydrateResult.ok) {
+        log(`Knowledge graph hydrated (${hydrateResult.value} edges)`);
+      } else {
+        log(`Knowledge graph hydration failed: ${hydrateResult.error.message}`);
+      }
+
+      // 3. Ensure llama-server binary is available (auto-download if missing)
       const ensureResult = await ensureLlamaServer(BINARY_DIR);
       if (!ensureResult.ok) throw ensureResult.error;
 
@@ -139,6 +149,7 @@ const start = async (): Promise<void> => {
       const processMessage = createProcessMessage({
         db,
         modelManager,
+        graphManager,
         enqueue: (msg) => messageRouter.enqueue(msg),
       });
       messageRouter = createMessageRouter({ processMessage });
@@ -164,6 +175,7 @@ const start = async (): Promise<void> => {
           db,
           router: messageRouter,
           modelManager,
+          graphManager,
           startedAt,
           version: VERSION,
         },
