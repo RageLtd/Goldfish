@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh\" 2>/dev/null || powershell.exe -ExecutionPolicy Bypass -File \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.ps1\"",
             "timeout": 600,
             "statusMessage": "Setting up goldfish (first run may download ~700MB)..."
           }

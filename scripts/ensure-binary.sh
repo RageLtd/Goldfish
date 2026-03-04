@@ -24,8 +24,9 @@ LLAMA_SERVER_VERSION_FILE="${DATA_DIR}/.llama-server-version"
 # ============================================================================
 
 case "$(uname -s)" in
-    Darwin) OS="darwin" ;;
-    Linux)  OS="linux" ;;
+    Darwin)          OS="darwin" ;;
+    Linux)           OS="linux" ;;
+    MINGW*|MSYS*|CYGWIN*) OS="windows" ;;
     *)
         echo "[goldfish] ERROR: Unsupported OS: $(uname -s)" >&2
         exit 1
@@ -98,9 +99,10 @@ get_latest_llama_tag() {
 # Map OS/ARCH to llama.cpp release tarball naming convention
 get_llama_platform_suffix() {
     case "${OS}-${ARCH}" in
-        darwin-arm64) echo "macos-arm64" ;;
-        darwin-x64)   echo "macos-x64" ;;
-        linux-x64)    echo "ubuntu-x64" ;;
+        darwin-arm64)  echo "macos-arm64" ;;
+        darwin-x64)    echo "macos-x64" ;;
+        linux-x64)     echo "ubuntu-x64" ;;
+        windows-x64)   echo "win-avx2-x64" ;;
         *)
             echo "[goldfish] ERROR: No llama.cpp release for ${OS}-${ARCH}" >&2
             exit 1
@@ -108,28 +110,43 @@ get_llama_platform_suffix() {
     esac
 }
 
+# Binary extension: .exe on Windows, empty otherwise
+bin_ext() {
+    if [ "$OS" = "windows" ]; then echo ".exe"; else echo ""; fi
+}
+
+# Archive extension: .zip on Windows, .tar.gz otherwise
+archive_ext() {
+    if [ "$OS" = "windows" ]; then echo ".zip"; else echo ".tar.gz"; fi
+}
+
 # ============================================================================
 # Phase 1: goldfish binary
 # ============================================================================
 
 phase1_goldfish() {
-    local binary="${BIN_DIR}/goldfish"
+    local ext
+    ext=$(bin_ext)
+    local binary="${BIN_DIR}/goldfish${ext}"
     local latest_tag
     latest_tag=$(get_latest_tag)
     local stored_version
     stored_version=$(get_stored_version)
 
     # Skip if binary exists and version matches
-    if [ -x "$binary" ] && [ -n "$latest_tag" ] && [ "$latest_tag" = "$stored_version" ]; then
+    if [ -f "$binary" ] && [ -n "$latest_tag" ] && [ "$latest_tag" = "$stored_version" ]; then
         return 0
     fi
 
     echo "[goldfish] Downloading goldfish binary (${PLATFORM})..." >&2
 
     mkdir -p "$BIN_DIR"
-    local url="https://github.com/${REPO}/releases/latest/download/goldfish-${PLATFORM}"
+    local url="https://github.com/${REPO}/releases/latest/download/goldfish-${PLATFORM}${ext}"
     download "$url" "$binary"
-    chmod +x "$binary"
+
+    if [ "$OS" != "windows" ]; then
+        chmod +x "$binary"
+    fi
 
     # On macOS, re-sign to clear Gatekeeper rejection from download provenance
     if [ "$OS" = "darwin" ]; then
@@ -148,13 +165,15 @@ phase1_goldfish() {
 # ============================================================================
 
 phase2_llama_server() {
+    local ext
+    ext=$(bin_ext)
     local stored_llama_version=""
     if [ -f "$LLAMA_SERVER_VERSION_FILE" ]; then
         stored_llama_version=$(cat "$LLAMA_SERVER_VERSION_FILE")
     fi
 
     # Skip if binary exists and version is stored (re-check on new releases)
-    if [ -x "${BIN_DIR}/llama-server" ] && [ -n "$stored_llama_version" ]; then
+    if [ -f "${BIN_DIR}/llama-server${ext}" ] && [ -n "$stored_llama_version" ]; then
         local latest_llama_tag
         latest_llama_tag=$(get_latest_llama_tag)
         if [ -n "$latest_llama_tag" ] && [ "$latest_llama_tag" = "$stored_llama_version" ]; then
@@ -176,50 +195,64 @@ phase2_llama_server() {
     echo "[goldfish] Downloading llama-server ${latest_llama_tag} (${platform_suffix})..." >&2
 
     mkdir -p "$BIN_DIR"
-    # Release tarballs are named like: llama-b5678-bin-macos-arm64.tar.gz
     local tag_number="${latest_llama_tag}"
-    local url="https://github.com/${LLAMA_REPO}/releases/download/${latest_llama_tag}/llama-${tag_number}-bin-${platform_suffix}.tar.gz"
-    local tmp_tar
-    tmp_tar=$(mktemp "${TMPDIR:-/tmp}/llama-server-XXXXXX")
-    mv "$tmp_tar" "${tmp_tar}.tar.gz"
-    tmp_tar="${tmp_tar}.tar.gz"
+    local arc_ext
+    arc_ext=$(archive_ext)
+    local url="https://github.com/${LLAMA_REPO}/releases/download/${latest_llama_tag}/llama-${tag_number}-bin-${platform_suffix}${arc_ext}"
+    local tmp_archive
+    tmp_archive=$(mktemp "${TMPDIR:-/tmp}/llama-server-XXXXXX")
+    mv "$tmp_archive" "${tmp_archive}${arc_ext}"
+    tmp_archive="${tmp_archive}${arc_ext}"
 
-    download "$url" "$tmp_tar"
+    download "$url" "$tmp_archive"
 
-    # Extract only llama-server binary (may be nested in build/bin/)
+    # Extract
     local tmp_extract
     tmp_extract=$(mktemp -d "${TMPDIR:-/tmp}/llama-server-extract-XXXXXX")
-    tar xzf "$tmp_tar" -C "$tmp_extract"
+
+    if [ "$OS" = "windows" ]; then
+        unzip -q "$tmp_archive" -d "$tmp_extract"
+    else
+        tar xzf "$tmp_archive" -C "$tmp_extract"
+    fi
 
     # Find llama-server in extracted contents (handles varying directory structure)
     local server_bin
-    server_bin=$(find "$tmp_extract" -name "llama-server" -type f | head -1)
+    server_bin=$(find "$tmp_extract" -name "llama-server${ext}" -type f | head -1)
 
     if [ -z "$server_bin" ]; then
-        echo "[goldfish] ERROR: llama-server binary not found in release tarball" >&2
-        rm -rf "$tmp_tar" "$tmp_extract"
+        echo "[goldfish] ERROR: llama-server binary not found in release archive" >&2
+        rm -rf "$tmp_archive" "$tmp_extract"
         exit 1
     fi
 
-    cp "$server_bin" "${BIN_DIR}/llama-server"
-    chmod +x "${BIN_DIR}/llama-server"
+    cp "$server_bin" "${BIN_DIR}/llama-server${ext}"
 
-    # Copy shared libraries (.dylib on macOS, .so on Linux) from same directory
+    if [ "$OS" != "windows" ]; then
+        chmod +x "${BIN_DIR}/llama-server${ext}"
+    fi
+
+    # Copy shared libraries from same directory
     local server_dir
     server_dir=$(dirname "$server_bin")
-    find "$server_dir" \( -name "*.dylib" -o -name "*.so" -o -name "*.so.*" \) -exec cp {} "${BIN_DIR}/" \;
 
-    # Create versioned soname symlinks (e.g. libmtmd.so.0 -> libmtmd.so)
-    for lib in "${BIN_DIR}"/*.so; do
-        [ -f "$lib" ] || continue
-        local soname
-        soname=$(objdump -p "$lib" 2>/dev/null | awk '/SONAME/{print $2}')
-        if [ -n "$soname" ] && [ ! -e "${BIN_DIR}/${soname}" ]; then
-            ln -s "$(basename "$lib")" "${BIN_DIR}/${soname}"
-        fi
-    done
+    if [ "$OS" = "windows" ]; then
+        find "$server_dir" -name "*.dll" -exec cp {} "${BIN_DIR}/" \;
+    else
+        find "$server_dir" \( -name "*.dylib" -o -name "*.so" -o -name "*.so.*" \) -exec cp {} "${BIN_DIR}/" \;
 
-    rm -rf "$tmp_tar" "$tmp_extract"
+        # Create versioned soname symlinks (e.g. libmtmd.so.0 -> libmtmd.so)
+        for lib in "${BIN_DIR}"/*.so; do
+            [ -f "$lib" ] || continue
+            local soname
+            soname=$(objdump -p "$lib" 2>/dev/null | awk '/SONAME/{print $2}')
+            if [ -n "$soname" ] && [ ! -e "${BIN_DIR}/${soname}" ]; then
+                ln -s "$(basename "$lib")" "${BIN_DIR}/${soname}"
+            fi
+        done
+    fi
+
+    rm -rf "$tmp_archive" "$tmp_extract"
 
     # Store version
     mkdir -p "$DATA_DIR"

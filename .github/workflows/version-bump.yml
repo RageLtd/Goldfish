@@ -90,6 +90,8 @@ jobs:
             platform: darwin-arm64
           - os: ubuntu-latest
             platform: linux-x64
+          - os: windows-latest
+            platform: windows-x64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -109,22 +111,39 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Build goldfish binary
+      - name: Build goldfish binary (Unix)
+        if: runner.os != 'Windows'
         run: |
           mkdir -p dist
           bun build --compile --minify \
             src/cli.ts --outfile dist/goldfish-${{ matrix.platform }}
           ls -lh dist/
 
+      - name: Build goldfish binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          bun build --compile --minify src/cli.ts --outfile dist/goldfish-${{ matrix.platform }}
+          Get-ChildItem dist/
+
       - name: Sign binary (macOS)
         if: startsWith(matrix.platform, 'darwin')
         run: codesign --force --sign - dist/goldfish-${{ matrix.platform }}
 
-      - name: Upload binary
+      - name: Upload binary (Unix)
+        if: runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: goldfish-${{ matrix.platform }}
           path: dist/goldfish-${{ matrix.platform }}
+
+      - name: Upload binary (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: goldfish-${{ matrix.platform }}
+          path: dist/goldfish-${{ matrix.platform }}.exe
 
   release:
     name: Create Release
@@ -149,6 +168,7 @@ jobs:
           files: |
             dist/goldfish-darwin-arm64
             dist/goldfish-linux-x64
+            dist/goldfish-windows-x64.exe
           generate_release_notes: true
 
       - name: Notify marketplace
@@ -170,3 +190,4 @@ jobs:
           echo "**Assets:**" >> $GITHUB_STEP_SUMMARY
           echo "- goldfish-darwin-arm64 (macOS M1/M2/M3)" >> $GITHUB_STEP_SUMMARY
           echo "- goldfish-linux-x64" >> $GITHUB_STEP_SUMMARY
+          echo "- goldfish-windows-x64.exe" >> $GITHUB_STEP_SUMMARY
