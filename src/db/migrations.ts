@@ -264,4 +264,45 @@ export const migrations: readonly Migration[] = [
       db.run("DROP TABLE IF EXISTS user_prompts");
     },
   },
+  {
+    version: 8,
+    description: "Create knowledge graph edges table",
+    up: (db) => {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS kg_edges (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          source_id INTEGER NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+          target_id INTEGER NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+          relation TEXT NOT NULL,
+          weight REAL NOT NULL DEFAULT 1.0,
+          direction TEXT NOT NULL DEFAULT 'directed',
+          explanation TEXT,
+          metadata TEXT,
+          created_at_epoch INTEGER NOT NULL,
+          UNIQUE(source_id, target_id, relation)
+        )
+      `);
+
+      db.run(
+        "CREATE INDEX IF NOT EXISTS idx_kg_edges_source ON kg_edges(source_id)",
+      );
+      db.run(
+        "CREATE INDEX IF NOT EXISTS idx_kg_edges_target ON kg_edges(target_id)",
+      );
+      db.run(
+        "CREATE INDEX IF NOT EXISTS idx_kg_edges_relation ON kg_edges(relation)",
+      );
+    },
+  },
+  {
+    version: 9,
+    description: "Add precomputed graph metadata to observations",
+    up: (db) => {
+      db.run("ALTER TABLE observations ADD COLUMN graph_centrality REAL");
+      db.run("ALTER TABLE observations ADD COLUMN graph_community INTEGER");
+      db.run(
+        "ALTER TABLE observations ADD COLUMN graph_degree INTEGER DEFAULT 0",
+      );
+    },
+  },
 ];

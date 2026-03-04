@@ -11,6 +11,7 @@ import {
   storeObservation,
   updateObservationEmbedding,
 } from "../../src/db/index";
+import { createGraphManager } from "../../src/graph/index";
 import type { ModelManager } from "../../src/models/manager";
 import {
   handleBackfill,
@@ -55,6 +56,7 @@ describe("handleRetrieve", () => {
     deps = {
       db,
       modelManager: mockModelManager,
+      graphManager: createGraphManager(),
     };
   });
 

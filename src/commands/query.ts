@@ -186,6 +186,39 @@ export const observationMain = async (): Promise<void> => {
 };
 
 // ============================================================================
+// goldfish graph:stats
+// ============================================================================
+
+export const graphStatsMain = async (): Promise<void> => {
+  const data = (await fetchJson(`${BASE}/graph/stats`)) as {
+    nodes?: number;
+    error?: string;
+  };
+
+  if (data.error) die(`Error: ${data.error}`);
+  log(JSON.stringify(data, null, 2));
+};
+
+// ============================================================================
+// goldfish graph:show <id>
+// ============================================================================
+
+export const graphShowMain = async (): Promise<void> => {
+  const { positional } = parseArgs();
+  const id = positional[0];
+
+  if (!id) die("Usage: goldfish graph:show <id>");
+
+  const data = (await fetchJson(`${BASE}/graph/neighbors?id=${id}`)) as {
+    neighbors?: unknown[];
+    error?: string;
+  };
+
+  if (data.error) die(`Error: ${data.error}`);
+  log(JSON.stringify(data, null, 2));
+};
+
+// ============================================================================
 // goldfish health
 // ============================================================================
 

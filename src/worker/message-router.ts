@@ -10,8 +10,11 @@ import {
   getObservationById,
   getSessionByClaudeId,
   updateObservationEmbedding,
+  updateObservationGraphMetadata,
   updateSessionStatus,
 } from "../db/index";
+import type { GraphManager } from "../graph/index";
+import { createEdges } from "../graph/index";
 import { buildEmbeddingText } from "../utils/embedding";
 import {
   type LocalAgentDeps,
@@ -48,11 +51,16 @@ export interface PruneData {
   readonly minScore: number;
 }
 
+export interface LinkData {
+  readonly observationId: number;
+}
+
 export type RouterMessageType =
   | "observation"
   | "summarize"
   | "complete"
   | "embed"
+  | "link"
   | "prune";
 
 export interface RouterMessage {
@@ -63,6 +71,7 @@ export interface RouterMessage {
     | SummarizeData
     | CompleteData
     | EmbedData
+    | LinkData
     | PruneData;
 }
 
@@ -119,6 +128,7 @@ export const createMessageRouter = (deps: MessageRouterDeps): MessageRouter => {
 
 export interface ProcessMessageDeps extends LocalAgentDeps {
   readonly enqueue: (msg: RouterMessage) => void;
+  readonly graphManager?: GraphManager;
 }
 
 /** Auto-prune defaults (read from env at module load) */
@@ -171,6 +181,32 @@ export const createProcessMessage = (
         log(
           `Failed to store embedding for #${data.observationId}: ${result.error.message}`,
         );
+      } else if (deps.graphManager) {
+        // Enqueue edge creation after embedding is stored
+        deps.enqueue({
+          type: "link",
+          claudeSessionId: msg.claudeSessionId,
+          data: { observationId: data.observationId },
+        });
+      }
+      return;
+    }
+
+    // Link messages run edge creation pipeline — no session context needed
+    if (msg.type === "link") {
+      const data = msg.data as LinkData;
+      if (deps.graphManager) {
+        const result = await createEdges(
+          db,
+          deps.graphManager,
+          { observationId: data.observationId },
+          deps.modelManager,
+        );
+        if (!result.ok) {
+          log(
+            `Failed to create edges for #${data.observationId}: ${result.error.message}`,
+          );
+        }
       }
       return;
     }
@@ -186,6 +222,22 @@ export const createProcessMessage = (
         minScore: data.minScore,
         dryRun: false,
       });
+      // Clean up in-memory graph for deleted nodes
+      if (deps.graphManager && result.deletedIds.length > 0) {
+        for (const id of result.deletedIds) {
+          deps.graphManager.removeNode(id);
+        }
+        const metadata = deps.graphManager.recomputeMetadata();
+        for (const [nodeId, meta] of metadata) {
+          updateObservationGraphMetadata(db, {
+            id: nodeId,
+            centrality: meta.centrality,
+            community: meta.community,
+            degree: meta.degree,
+          });
+        }
+      }
+
       _lastPruneStats = {
         epoch: Date.now(),
         aged: result.aged,

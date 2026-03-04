@@ -269,3 +269,82 @@ export const parseSmartSearchToolCall = (
   // Legacy search_memory — treat as FTS for backward compat
   return { mode: "fts", query };
 };
+
+// ============================================================================
+// Graph Tool Call Parsers
+// ============================================================================
+
+export interface QueryGraphToolCall {
+  readonly kind: "query_graph";
+  readonly observationId: number;
+}
+
+export interface ClassifyRelationship {
+  readonly sourceId: number;
+  readonly targetId: number;
+  readonly relationship: string;
+  readonly direction: string;
+  readonly strength: number;
+  readonly explanation?: string;
+}
+
+export interface ClassifyRelationshipToolCall {
+  readonly kind: "classify_relationship";
+  readonly relationships: readonly ClassifyRelationship[];
+}
+
+export type GraphToolCall = QueryGraphToolCall | ClassifyRelationshipToolCall;
+
+/**
+ * Parses a graph tool call (query_graph or classify_relationship) from model output.
+ * Returns null if no recognized graph tool call is found.
+ */
+export const parseGraphToolCall = (text: string): GraphToolCall | null => {
+  const extracted = extractToolCallJson(text);
+  if (!extracted) return null;
+
+  const { name, rawArgs } = extracted;
+
+  if (name === "query_graph") {
+    const obsId = rawArgs.observation_id;
+    if (typeof obsId !== "number" || !Number.isFinite(obsId)) return null;
+    return { kind: "query_graph", observationId: obsId };
+  }
+
+  if (name === "classify_relationship") {
+    if (!Array.isArray(rawArgs.relationships)) return null;
+
+    const relationships: ClassifyRelationship[] = [];
+    for (const item of rawArgs.relationships) {
+      if (typeof item !== "object" || item === null) continue;
+      const r = item as Record<string, unknown>;
+
+      if (
+        typeof r.source_id !== "number" ||
+        typeof r.target_id !== "number" ||
+        typeof r.relationship !== "string" ||
+        typeof r.direction !== "string" ||
+        typeof r.strength !== "number"
+      ) {
+        continue;
+      }
+
+      // Skip "none" relationships
+      if (r.relationship === "none") continue;
+
+      relationships.push({
+        sourceId: r.source_id,
+        targetId: r.target_id,
+        relationship: r.relationship,
+        direction: r.direction,
+        strength: Math.max(0, Math.min(1, r.strength)),
+        explanation:
+          typeof r.explanation === "string" ? r.explanation : undefined,
+      });
+    }
+
+    return { kind: "classify_relationship", relationships };
+  }
+
+  return null;
+};

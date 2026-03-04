@@ -167,6 +167,40 @@ export type TimelineItem =
   | { readonly kind: "summary"; readonly data: SessionSummary };
 
 // ============================================================================
+// Knowledge Graph
+// ============================================================================
+
+export const EDGE_RELATION_TYPES = [
+  "similar-to",
+  "shares-file",
+  "shares-concept",
+  "same-session",
+  "followed-by",
+  "caused-by",
+  "supersedes",
+  "implements",
+  "relates-to",
+] as const;
+
+export type EdgeRelationType = (typeof EDGE_RELATION_TYPES)[number];
+
+export const EDGE_DIRECTIONS = ["directed", "bidirectional"] as const;
+
+export type EdgeDirection = (typeof EDGE_DIRECTIONS)[number];
+
+export interface KnowledgeGraphEdge {
+  readonly id: number;
+  readonly sourceId: number;
+  readonly targetId: number;
+  readonly relation: EdgeRelationType;
+  readonly weight: number;
+  readonly direction: EdgeDirection;
+  readonly explanation: string | null;
+  readonly metadata: Record<string, unknown> | null;
+  readonly createdAtEpoch: number;
+}
+
+// ============================================================================
 // Context Injection
 // ============================================================================
 
