@@ -305,4 +305,44 @@ export const migrations: readonly Migration[] = [
       );
     },
   },
+  {
+    version: 10,
+    description:
+      "Deduplicate bidirectional edges and normalize source_id < target_id",
+    up: (db) => {
+      // Delete duplicate bidirectional edges where the reverse also exists.
+      // For each pair (A,B) with direction='bidirectional', keep only the row
+      // where source_id < target_id (or the lower id if both point the same way).
+      db.run(`
+        DELETE FROM kg_edges
+        WHERE direction = 'bidirectional'
+          AND source_id > target_id
+          AND EXISTS (
+            SELECT 1 FROM kg_edges e2
+            WHERE e2.source_id = kg_edges.target_id
+              AND e2.target_id = kg_edges.source_id
+              AND e2.relation = kg_edges.relation
+              AND e2.direction = 'bidirectional'
+          )
+      `);
+
+      // Normalize remaining bidirectional edges where source_id > target_id
+      // by swapping the IDs. Use a temp table to avoid unique constraint conflicts.
+      db.run(`
+        CREATE TEMP TABLE edges_to_flip AS
+        SELECT id, target_id AS new_source, source_id AS new_target
+        FROM kg_edges
+        WHERE direction = 'bidirectional' AND source_id > target_id
+      `);
+
+      db.run(`
+        UPDATE kg_edges
+        SET source_id = (SELECT new_source FROM edges_to_flip WHERE edges_to_flip.id = kg_edges.id),
+            target_id = (SELECT new_target FROM edges_to_flip WHERE edges_to_flip.id = kg_edges.id)
+        WHERE id IN (SELECT id FROM edges_to_flip)
+      `);
+
+      db.run("DROP TABLE IF EXISTS edges_to_flip");
+    },
+  },
 ];

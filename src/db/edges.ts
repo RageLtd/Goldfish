@@ -55,14 +55,22 @@ export const storeEdge = (
   } = input;
   const now = Date.now();
 
+  // Normalize bidirectional edges so source_id < target_id.
+  // This ensures the UNIQUE(source_id, target_id, relation) constraint
+  // catches duplicates regardless of insertion order.
+  const normalizedSource =
+    direction === "bidirectional" ? Math.min(sourceId, targetId) : sourceId;
+  const normalizedTarget =
+    direction === "bidirectional" ? Math.max(sourceId, targetId) : targetId;
+
   return fromTry(() => {
     const result = db.run(
       `INSERT OR IGNORE INTO kg_edges
        (source_id, target_id, relation, weight, direction, explanation, metadata, created_at_epoch)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        sourceId,
-        targetId,
+        normalizedSource,
+        normalizedTarget,
         relation,
         weight,
         direction,
@@ -81,7 +89,7 @@ export const storeEdge = (
       .query<{ id: number }, [number, number, string]>(
         "SELECT id FROM kg_edges WHERE source_id = ? AND target_id = ? AND relation = ?",
       )
-      .get(sourceId, targetId, relation);
+      .get(normalizedSource, normalizedTarget, relation);
 
     return existing ? existing.id : 0;
   });

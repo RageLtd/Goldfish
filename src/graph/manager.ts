@@ -60,7 +60,17 @@ export const createGraphManager = (): GraphManager => {
     ensureNode(edge.sourceId);
     ensureNode(edge.targetId);
 
-    const edgeKey = `${edge.sourceId}-${edge.targetId}-${edge.relation}`;
+    // Normalize bidirectional edge keys so min-max ordering prevents duplicates
+    const src =
+      edge.direction === "bidirectional"
+        ? Math.min(edge.sourceId, edge.targetId)
+        : edge.sourceId;
+    const tgt =
+      edge.direction === "bidirectional"
+        ? Math.max(edge.sourceId, edge.targetId)
+        : edge.targetId;
+
+    const edgeKey = `${src}-${tgt}-${edge.relation}`;
     if (graph.hasEdge(edgeKey)) return;
 
     const attrs = {
@@ -70,19 +80,9 @@ export const createGraphManager = (): GraphManager => {
     };
 
     if (edge.direction === "bidirectional") {
-      graph.addUndirectedEdgeWithKey(
-        edgeKey,
-        String(edge.sourceId),
-        String(edge.targetId),
-        attrs,
-      );
+      graph.addUndirectedEdgeWithKey(edgeKey, String(src), String(tgt), attrs);
     } else {
-      graph.addDirectedEdgeWithKey(
-        edgeKey,
-        String(edge.sourceId),
-        String(edge.targetId),
-        attrs,
-      );
+      graph.addDirectedEdgeWithKey(edgeKey, String(src), String(tgt), attrs);
     }
   };
 
@@ -126,9 +126,14 @@ export const createGraphManager = (): GraphManager => {
     const key = String(id);
     if (!graph.hasNode(key)) return [];
 
+    const seen = new Set<string>();
     const neighbors: NeighborInfo[] = [];
     graph.forEachEdge(key, (_edge, attrs, source, target) => {
       const neighborKey = source === key ? target : source;
+      const dedupeKey = `${neighborKey}-${attrs.relation ?? "unknown"}`;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+
       neighbors.push({
         nodeId: Number(neighborKey),
         relation: attrs.relation ?? "unknown",

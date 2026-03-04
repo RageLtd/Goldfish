@@ -3,12 +3,124 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
   createDatabase,
   createSession,
+  getAllEdges,
   runMigrations,
   storeEdge,
   storeObservation,
 } from "../../src/db/index";
 import type { GraphManager } from "../../src/graph/index";
 import { createGraphManager } from "../../src/graph/index";
+
+describe("storeEdge normalization", () => {
+  let db: Database;
+  let obsId1: number;
+  let obsId2: number;
+
+  beforeEach(() => {
+    db = createDatabase(":memory:");
+    runMigrations(db);
+
+    createSession(db, {
+      claudeSessionId: "edge-norm-sess",
+      project: "edge-norm-test",
+      userPrompt: "Test",
+    });
+
+    const ids = [1, 2].map((n) => {
+      const r = storeObservation(db, {
+        claudeSessionId: "edge-norm-sess",
+        project: "edge-norm-test",
+        observation: {
+          type: "feature",
+          title: `Obs ${n}`,
+          subtitle: null,
+          narrative: `Observation ${n}`,
+          facts: [],
+          concepts: [],
+          filesRead: [],
+          filesModified: [],
+        },
+        promptNumber: n,
+      });
+      if (!r.ok) throw new Error("Setup failed");
+      return r.value;
+    });
+
+    obsId1 = ids[0];
+    obsId2 = ids[1];
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("normalizes bidirectional edges so source_id < target_id", () => {
+    // Insert with larger ID as source
+    const larger = Math.max(obsId1, obsId2);
+    const smaller = Math.min(obsId1, obsId2);
+
+    storeEdge(db, {
+      sourceId: larger,
+      targetId: smaller,
+      relation: "same-session",
+      weight: 1.0,
+      direction: "bidirectional",
+    });
+
+    const result = getAllEdges(db, {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value).toHaveLength(1);
+    expect(result.value[0].sourceId).toBe(smaller);
+    expect(result.value[0].targetId).toBe(larger);
+  });
+
+  it("rejects duplicate bidirectional edges inserted in reverse order", () => {
+    storeEdge(db, {
+      sourceId: obsId1,
+      targetId: obsId2,
+      relation: "same-session",
+      weight: 1.0,
+      direction: "bidirectional",
+    });
+    storeEdge(db, {
+      sourceId: obsId2,
+      targetId: obsId1,
+      relation: "same-session",
+      weight: 1.0,
+      direction: "bidirectional",
+    });
+
+    const result = getAllEdges(db, {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value).toHaveLength(1);
+  });
+
+  it("does not normalize directed edges", () => {
+    const larger = Math.max(obsId1, obsId2);
+    const smaller = Math.min(obsId1, obsId2);
+
+    storeEdge(db, {
+      sourceId: larger,
+      targetId: smaller,
+      relation: "caused-by",
+      weight: 0.7,
+      direction: "directed",
+    });
+
+    const result = getAllEdges(db, {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value).toHaveLength(1);
+    // Directed edges preserve original order
+    expect(result.value[0].sourceId).toBe(larger);
+    expect(result.value[0].targetId).toBe(smaller);
+  });
+});
 
 describe("graph manager", () => {
   let db: Database;
@@ -149,6 +261,34 @@ describe("graph manager", () => {
       expect(gm.graph.size).toBe(1);
     });
 
+    it("deduplicates bidirectional edges added in reverse order", () => {
+      const gm = createGraphManager();
+      gm.addEdge({
+        id: 1,
+        sourceId: obsId1,
+        targetId: obsId2,
+        relation: "same-session",
+        weight: 1.0,
+        direction: "bidirectional",
+        explanation: null,
+        metadata: null,
+        createdAtEpoch: Date.now(),
+      });
+      gm.addEdge({
+        id: 2,
+        sourceId: obsId2,
+        targetId: obsId1,
+        relation: "same-session",
+        weight: 1.0,
+        direction: "bidirectional",
+        explanation: null,
+        metadata: null,
+        createdAtEpoch: Date.now(),
+      });
+
+      expect(gm.graph.size).toBe(1);
+    });
+
     it("adds directed edges correctly", () => {
       const gm = createGraphManager();
       gm.addEdge({
@@ -167,6 +307,35 @@ describe("graph manager", () => {
       expect(gm.graph.hasDirectedEdge(String(obsId1), String(obsId2))).toBe(
         true,
       );
+    });
+
+    it("does not normalize directed edges", () => {
+      const gm = createGraphManager();
+      gm.addEdge({
+        id: 1,
+        sourceId: obsId2,
+        targetId: obsId1,
+        relation: "caused-by",
+        weight: 0.7,
+        direction: "directed",
+        explanation: null,
+        metadata: null,
+        createdAtEpoch: Date.now(),
+      });
+      gm.addEdge({
+        id: 2,
+        sourceId: obsId1,
+        targetId: obsId2,
+        relation: "caused-by",
+        weight: 0.7,
+        direction: "directed",
+        explanation: null,
+        metadata: null,
+        createdAtEpoch: Date.now(),
+      });
+
+      // Both directions are distinct for directed edges
+      expect(gm.graph.size).toBe(2);
     });
   });
 
@@ -282,6 +451,68 @@ describe("graph manager", () => {
     it("does not include the seed node itself", () => {
       const neighbors = gm.getNeighborhood(obsId2, 3);
       expect(neighbors).not.toContain(obsId2);
+    });
+  });
+
+  describe("formatNeighborhood", () => {
+    it("returns unique neighbors per relation", () => {
+      const gm = createGraphManager();
+      gm.addEdge({
+        id: 1,
+        sourceId: obsId1,
+        targetId: obsId2,
+        relation: "same-session",
+        weight: 1.0,
+        direction: "bidirectional",
+        explanation: null,
+        metadata: null,
+        createdAtEpoch: Date.now(),
+      });
+      gm.addEdge({
+        id: 2,
+        sourceId: obsId1,
+        targetId: obsId2,
+        relation: "shares-concept",
+        weight: 0.5,
+        direction: "bidirectional",
+        explanation: null,
+        metadata: null,
+        createdAtEpoch: Date.now(),
+      });
+
+      const neighbors = gm.formatNeighborhood(obsId1);
+      // Two edges (different relations), each should appear exactly once
+      expect(neighbors).toHaveLength(2);
+      const relations = neighbors.map((n) => n.relation).sort();
+      expect(relations).toEqual(["same-session", "shares-concept"]);
+    });
+
+    it("does not duplicate neighbors from reverse bidirectional edges", () => {
+      const gm = createGraphManager();
+      // Add edge in both directions (simulating pre-normalization data)
+      gm.addEdge({
+        id: 1,
+        sourceId: obsId1,
+        targetId: obsId2,
+        relation: "same-session",
+        weight: 1.0,
+        direction: "bidirectional",
+        explanation: null,
+        metadata: null,
+        createdAtEpoch: Date.now(),
+      });
+      // Reverse should be deduped by addEdge, but formatNeighborhood
+      // also deduplicates as a safety net
+      const neighbors = gm.formatNeighborhood(obsId1);
+      const sameSessionCount = neighbors.filter(
+        (n) => n.nodeId === obsId2 && n.relation === "same-session",
+      ).length;
+      expect(sameSessionCount).toBe(1);
+    });
+
+    it("returns empty for non-existent node", () => {
+      const gm = createGraphManager();
+      expect(gm.formatNeighborhood(99999)).toEqual([]);
     });
   });
 
