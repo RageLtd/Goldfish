@@ -131,6 +131,11 @@ phase1_goldfish() {
     download "$url" "$binary"
     chmod +x "$binary"
 
+    # On macOS, re-sign to clear Gatekeeper rejection from download provenance
+    if [ "$OS" = "darwin" ]; then
+        codesign --force --sign - "$binary" 2>/dev/null || true
+    fi
+
     # Store version
     mkdir -p "$DATA_DIR"
     echo "$latest_tag" > "$VERSION_FILE"
