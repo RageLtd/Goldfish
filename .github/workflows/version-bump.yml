@@ -116,6 +116,10 @@ jobs:
             src/cli.ts --outfile dist/goldfish-${{ matrix.platform }}
           ls -lh dist/
 
+      - name: Sign binary (macOS)
+        if: startsWith(matrix.platform, 'darwin')
+        run: codesign --force --sign - dist/goldfish-${{ matrix.platform }}
+
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
