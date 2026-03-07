@@ -261,6 +261,47 @@ export const getCandidateObservations = (
 };
 
 // ============================================================================
+// Lightweight FTS Search (for hybrid retrieval)
+// ============================================================================
+
+/**
+ * Lightweight FTS5 search returning observation IDs and normalized scores.
+ * Used for hybrid search — combining FTS keyword matches with embedding similarity.
+ * Scores are normalized to [0, 1] where 1 is the best FTS match.
+ */
+export const searchObservationIds = (
+  db: Database,
+  input: { readonly query: string; readonly limit: number },
+): Result<ReadonlyMap<number, number>> => {
+  return fromTry(() => {
+    const rows = db
+      .query<{ id: number; rank: number }, [string, number]>(
+        `SELECT o.id, fts.rank
+         FROM observations o
+         JOIN observations_fts fts ON o.id = fts.rowid
+         WHERE observations_fts MATCH ?
+         ORDER BY fts.rank
+         LIMIT ?`,
+      )
+      .all(input.query, input.limit);
+
+    if (rows.length === 0) return new Map();
+
+    // Normalize FTS5 BM25 ranks (negative; more negative = better match)
+    const bestRank = rows[0].rank;
+    const worstRank = rows[rows.length - 1].rank;
+    const range = bestRank - worstRank;
+
+    const result = new Map<number, number>();
+    for (const row of rows) {
+      const normalized = range === 0 ? 1.0 : (row.rank - worstRank) / range;
+      result.set(row.id, normalized);
+    }
+    return result;
+  });
+};
+
+// ============================================================================
 // Embedding Operations
 // ============================================================================
 

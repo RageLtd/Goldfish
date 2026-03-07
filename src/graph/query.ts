@@ -12,6 +12,7 @@ import type { ModelManager } from "../models/manager";
 import type { Observation } from "../types/domain";
 import { fromPromise, ok, type Result } from "../types/result";
 import { cosineSimilarity } from "../utils/relevance";
+import type { EmbeddingCacheEntry } from "../worker/embedding-cache";
 import type { GraphManager } from "./manager";
 import { findSeeds, type ScoredSeed, spreadingActivation } from "./retrieval";
 
@@ -27,6 +28,12 @@ export const SAME_PROJECT_BONUS = 0.15;
 
 /** Minimum cosine similarity for an observation to be considered a seed. */
 export const SEED_SIMILARITY_THRESHOLD = 0.4;
+
+/** Maximum seeds passed to spreading activation to bound graph traversal time. */
+export const MAX_GRAPH_SEEDS = 50;
+
+/** Additive weight for FTS keyword matches in hybrid scoring. */
+export const FTS_BONUS = 0.3;
 
 // ============================================================================
 // Types
@@ -57,8 +64,12 @@ export const queryGraph = async (input: {
   readonly query: string;
   readonly project?: string;
   readonly limit: number;
+  readonly embeddingCache?: ReadonlyMap<number, EmbeddingCacheEntry>;
+  /** FTS5 keyword hits (observation ID → normalized score 0-1) for hybrid search. */
+  readonly ftsHits?: ReadonlyMap<number, number>;
 }): Promise<Result<GraphQueryResult>> => {
   const { db, modelManager, graphManager, query, project, limit } = input;
+  const t0 = isDev ? performance.now() : 0;
 
   const embeddingResult = await fromPromise(
     modelManager.computeEmbedding(query),
@@ -66,59 +77,89 @@ export const queryGraph = async (input: {
   if (!embeddingResult.ok) return embeddingResult;
 
   const queryEmbedding = embeddingResult.value;
-  const candidatesResult = getObservationsWithEmbeddings(db, {});
-  if (!candidatesResult.ok) return candidatesResult;
+  const tEmbed = isDev ? performance.now() : 0;
 
-  const candidates = candidatesResult.value;
+  // Use in-memory cache when available; fall back to DB query
+  let candidateMap: Map<number, EmbeddingCacheEntry>;
+  if (input.embeddingCache) {
+    candidateMap = new Map(input.embeddingCache);
+  } else {
+    const candidatesResult = getObservationsWithEmbeddings(db, {});
+    if (!candidatesResult.ok) return candidatesResult;
+    candidateMap = new Map(candidatesResult.value.map((c) => [c.id, c]));
+  }
 
   // Build embedding map for seed finding
   const embeddingMap = new Map<number, Float32Array>();
-  for (const c of candidates) {
-    embeddingMap.set(c.id, c.embedding);
+  for (const [id, c] of candidateMap) {
+    embeddingMap.set(id, c.embedding);
   }
 
-  const seeds = findSeeds(
+  const allSeeds = findSeeds(
     queryEmbedding,
     embeddingMap,
     SEED_SIMILARITY_THRESHOLD,
     cosineSimilarity,
   );
+  const seeds = allSeeds.slice(0, MAX_GRAPH_SEEDS);
 
-  debug(`[graph-query] seeds=${seeds.length} query="${query.slice(0, 60)}"`);
+  const tSeeds = isDev ? performance.now() : 0;
+  debug(
+    `[graph-query] seeds=${seeds.length}/${allSeeds.length} query="${query.slice(0, 60)}"`,
+  );
 
-  // Run spreading activation
+  // Run spreading activation using pre-computed adjacency map
   const activated =
-    graphManager.graph.size > 0
-      ? spreadingActivation(graphManager.graph, seeds, {
+    graphManager.adjacency.size > 0
+      ? spreadingActivation(graphManager.adjacency, seeds, {
           maxResults: limit * 2,
         })
       : [];
 
+  const tGraph = isDev ? performance.now() : 0;
   debug(`[graph-query] activated=${activated.length} via graph traversal`);
 
   // Score: seed similarity + graph activation + project bonus
   const scoreMap = new Map<number, number>();
 
   for (const seed of seeds) {
-    const c = candidates.find((x) => x.id === seed.observationId);
+    const c = candidateMap.get(seed.observationId);
     const bonus = project && c?.project === project ? SAME_PROJECT_BONUS : 0;
     scoreMap.set(seed.observationId, seed.activation + bonus);
   }
 
   for (const node of activated) {
     const existing = scoreMap.get(node.observationId) ?? 0;
-    const c = candidates.find((x) => x.id === node.observationId);
+    const c = candidateMap.get(node.observationId);
     const bonus = project && c?.project === project ? SAME_PROJECT_BONUS : 0;
     scoreMap.set(node.observationId, existing + node.activation + bonus);
+  }
+
+  // Merge FTS keyword hits — boosts dual-signal matches, adds FTS-only discoveries
+  if (input.ftsHits && input.ftsHits.size > 0) {
+    let ftsNew = 0;
+    for (const [id, normalizedScore] of input.ftsHits) {
+      const ftsScore = normalizedScore * FTS_BONUS;
+      const existing = scoreMap.get(id);
+      if (existing !== undefined) {
+        scoreMap.set(id, existing + ftsScore);
+      } else {
+        const c = candidateMap.get(id);
+        const bonus =
+          project && c?.project === project ? SAME_PROJECT_BONUS : 0;
+        scoreMap.set(id, ftsScore + bonus);
+        ftsNew++;
+      }
+    }
+    debug(
+      `[graph-query] fts merged=${input.ftsHits.size} (${ftsNew} new, ${input.ftsHits.size - ftsNew} boosted)`,
+    );
   }
 
   // Sort and limit
   const ranked = Array.from(scoreMap.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit);
-
-  // Build candidate lookup for fast access
-  const candidateMap = new Map(candidates.map((c) => [c.id, c]));
 
   const observations: Observation[] = [];
   for (const [id] of ranked) {
@@ -149,6 +190,13 @@ export const queryGraph = async (input: {
     }
   }
 
+  if (isDev) {
+    const total = performance.now() - t0;
+    debug(
+      `[graph-query] PERF total=${total.toFixed(1)}ms embed=${(tEmbed - t0).toFixed(1)}ms seeds=${(tSeeds - tEmbed).toFixed(1)}ms graph=${(tGraph - tSeeds).toFixed(1)}ms score=${(performance.now() - tGraph).toFixed(1)}ms candidates=${candidateMap.size}`,
+    );
+  }
+
   return ok({ observations });
 };
 
@@ -173,8 +221,8 @@ export const expandSeeds = (input: {
   const { db, graphManager, seeds, candidateMap, limit } = input;
 
   const activated =
-    graphManager.graph.size > 0
-      ? spreadingActivation(graphManager.graph, seeds, {
+    graphManager.adjacency.size > 0
+      ? spreadingActivation(graphManager.adjacency, seeds, {
           maxResults: limit * 2,
         })
       : [];

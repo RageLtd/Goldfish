@@ -12,6 +12,7 @@ import { bfsFromNode } from "graphology-traversal";
 import { getAllEdges } from "../db/index";
 import type { KnowledgeGraphEdge } from "../types/domain";
 import { err, ok, type Result } from "../types/result";
+import type { AdjacencyEntry, AdjacencyMap } from "./retrieval";
 
 // ============================================================================
 // Types
@@ -34,6 +35,8 @@ export interface NeighborInfo {
 
 export interface GraphManager {
   readonly graph: Graph;
+  /** Pre-computed adjacency map for fast spreading activation. */
+  readonly adjacency: AdjacencyMap;
   hydrate(db: Database): Result<number>;
   addEdge(edge: KnowledgeGraphEdge): void;
   removeNode(observationId: number): void;
@@ -48,6 +51,23 @@ export interface GraphManager {
 
 export const createGraphManager = (): GraphManager => {
   const graph = new Graph({ multi: true, type: "mixed" });
+  const adjacency = new Map<string, AdjacencyEntry[]>();
+
+  /** Rebuild adjacency entries for a single node from the graph. */
+  const rebuildAdjacencyForNode = (nodeKey: string): void => {
+    const neighbors = new Map<string, number>();
+    graph.forEachEdge(nodeKey, (_edge, attrs, source, target) => {
+      const neighborKey = source === nodeKey ? target : source;
+      const w = (attrs.weight as number) ?? 1.0;
+      const existing = neighbors.get(neighborKey) ?? 0;
+      if (w > existing) neighbors.set(neighborKey, w);
+    });
+    const entries: AdjacencyEntry[] = [];
+    for (const [neighbor, weight] of neighbors) {
+      entries.push({ neighbor, weight });
+    }
+    adjacency.set(nodeKey, entries);
+  };
 
   const ensureNode = (id: number): void => {
     const key = String(id);
@@ -84,6 +104,10 @@ export const createGraphManager = (): GraphManager => {
     } else {
       graph.addDirectedEdgeWithKey(edgeKey, String(src), String(tgt), attrs);
     }
+
+    // Update adjacency for both endpoints
+    rebuildAdjacencyForNode(String(src));
+    rebuildAdjacencyForNode(String(tgt));
   };
 
   const hydrate = (db: Database): Result<number> => {
@@ -93,8 +117,44 @@ export const createGraphManager = (): GraphManager => {
     }
 
     const edges = edgesResult.value;
+    // Batch-add edges without per-edge adjacency rebuild
     for (const edge of edges) {
-      addEdge(edge);
+      ensureNode(edge.sourceId);
+      ensureNode(edge.targetId);
+
+      const src =
+        edge.direction === "bidirectional"
+          ? Math.min(edge.sourceId, edge.targetId)
+          : edge.sourceId;
+      const tgt =
+        edge.direction === "bidirectional"
+          ? Math.max(edge.sourceId, edge.targetId)
+          : edge.targetId;
+
+      const edgeKey = `${src}-${tgt}-${edge.relation}`;
+      if (graph.hasEdge(edgeKey)) continue;
+
+      const attrs = {
+        relation: edge.relation,
+        weight: edge.weight,
+        direction: edge.direction,
+      };
+
+      if (edge.direction === "bidirectional") {
+        graph.addUndirectedEdgeWithKey(
+          edgeKey,
+          String(src),
+          String(tgt),
+          attrs,
+        );
+      } else {
+        graph.addDirectedEdgeWithKey(edgeKey, String(src), String(tgt), attrs);
+      }
+    }
+
+    // Build full adjacency map once after all edges are loaded
+    for (const node of graph.nodes()) {
+      rebuildAdjacencyForNode(node);
     }
 
     return ok(edges.length);
@@ -103,7 +163,21 @@ export const createGraphManager = (): GraphManager => {
   const removeNode = (observationId: number): void => {
     const key = String(observationId);
     if (graph.hasNode(key)) {
+      // Collect neighbors before dropping so we can rebuild their adjacency
+      const neighbors: string[] = [];
+      graph.forEachNeighbor(key, (neighbor) => neighbors.push(neighbor));
+
       graph.dropNode(key);
+      adjacency.delete(key);
+
+      // Rebuild adjacency for affected neighbors
+      for (const neighbor of neighbors) {
+        if (graph.hasNode(neighbor)) {
+          rebuildAdjacencyForNode(neighbor);
+        } else {
+          adjacency.delete(neighbor);
+        }
+      }
     }
   };
 
@@ -184,6 +258,7 @@ export const createGraphManager = (): GraphManager => {
 
   return {
     graph,
+    adjacency,
     hydrate,
     addEdge,
     removeNode,

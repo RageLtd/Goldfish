@@ -28,6 +28,8 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
 export interface ScoringContext {
   readonly currentProject: string;
   readonly cwdFiles: readonly string[];
+  /** Pre-built Set for cwdFiles — avoids repeated Set construction in hot loops. */
+  readonly cwdFileSet?: ReadonlySet<string>;
   readonly ftsRanks: Map<number, number>;
   readonly embeddingScores?: Map<number, number>;
   readonly config?: ScoringConfig;
@@ -103,14 +105,17 @@ export const cosineSimilarity = (a: Float32Array, b: Float32Array): number => {
 
 /**
  * Calculates proportion of observation files found in cwd file set.
+ * Accepts a pre-built Set for hot-loop callers to avoid repeated Set construction.
  */
 export const calculateFileOverlapScore = (
   obsFiles: readonly string[],
-  cwdFiles: readonly string[],
+  cwdFiles: readonly string[] | ReadonlySet<string>,
 ): number => {
-  if (obsFiles.length === 0 || cwdFiles.length === 0) return 0;
+  if (obsFiles.length === 0) return 0;
 
-  const cwdSet = new Set(cwdFiles);
+  const cwdSet = cwdFiles instanceof Set ? cwdFiles : new Set(cwdFiles);
+  if (cwdSet.size === 0) return 0;
+
   let matches = 0;
   for (const f of obsFiles) {
     if (cwdSet.has(f)) matches++;
@@ -156,7 +161,8 @@ export const scoreObservation = (
   );
 
   const allFiles = [...observation.filesRead, ...observation.filesModified];
-  const fileOverlap = calculateFileOverlapScore(allFiles, context.cwdFiles);
+  const cwdSet = context.cwdFileSet ?? new Set(context.cwdFiles);
+  const fileOverlap = calculateFileOverlapScore(allFiles, cwdSet);
 
   const projectBonus =
     observation.project === context.currentProject

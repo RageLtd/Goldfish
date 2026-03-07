@@ -208,8 +208,7 @@ export const runHook = async <T>(
 
       log("DEBUG", `[${hookName}] Ensuring worker is running`);
       await ensureWorker();
-      const healthy = await isWorkerHealthy();
-      log("INFO", `[${hookName}] Worker healthy: ${healthy}`);
+      // ensureWorker already verifies health — no redundant check
 
       const deps = getDefaultDeps();
       log("DEBUG", `[${hookName}] Calling processor`);

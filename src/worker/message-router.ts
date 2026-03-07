@@ -16,6 +16,7 @@ import {
 import type { GraphManager } from "../graph/index";
 import { createEdges } from "../graph/index";
 import { buildEmbeddingText } from "../utils/embedding";
+import type { EmbeddingCache } from "./embedding-cache";
 import {
   type LocalAgentDeps,
   processObservation,
@@ -129,6 +130,7 @@ export const createMessageRouter = (deps: MessageRouterDeps): MessageRouter => {
 export interface ProcessMessageDeps extends LocalAgentDeps {
   readonly enqueue: (msg: RouterMessage) => void;
   readonly graphManager?: GraphManager;
+  readonly embeddingCache?: EmbeddingCache;
 }
 
 /** Auto-prune defaults (read from env at module load) */
@@ -181,13 +183,31 @@ export const createProcessMessage = (
         log(
           `Failed to store embedding for #${data.observationId}: ${result.error.message}`,
         );
-      } else if (deps.graphManager) {
-        // Enqueue edge creation after embedding is stored
-        deps.enqueue({
-          type: "link",
-          claudeSessionId: msg.claudeSessionId,
-          data: { observationId: data.observationId },
-        });
+      } else {
+        // Update in-memory cache so queries see new embeddings immediately
+        if (deps.embeddingCache) {
+          const obs = getObservationById(db, data.observationId);
+          if (obs.ok && obs.value) {
+            deps.embeddingCache.set(data.observationId, {
+              id: data.observationId,
+              title: obs.value.title,
+              narrative: obs.value.narrative,
+              project: obs.value.project,
+              type: obs.value.type,
+              createdAtEpoch: obs.value.createdAtEpoch,
+              sdkSessionId: obs.value.sdkSessionId,
+              embedding,
+            });
+          }
+        }
+        if (deps.graphManager) {
+          // Enqueue edge creation after embedding is stored
+          deps.enqueue({
+            type: "link",
+            claudeSessionId: msg.claudeSessionId,
+            data: { observationId: data.observationId },
+          });
+        }
       }
       return;
     }
@@ -222,7 +242,14 @@ export const createProcessMessage = (
         minScore: data.minScore,
         dryRun: false,
       });
-      // Clean up in-memory graph for deleted nodes
+      // Clean up in-memory caches for deleted nodes
+      if (result.deletedIds.length > 0) {
+        if (deps.embeddingCache) {
+          for (const id of result.deletedIds) {
+            deps.embeddingCache.delete(id);
+          }
+        }
+      }
       if (deps.graphManager && result.deletedIds.length > 0) {
         for (const id of result.deletedIds) {
           deps.graphManager.removeNode(id);

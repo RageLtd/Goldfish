@@ -25,6 +25,7 @@ import {
 } from "../models/server-manager";
 import { fromPromise } from "../types/result";
 import { ensureDbDir } from "../utils/fs";
+import { loadEmbeddingCache } from "./embedding-cache";
 import { createMessageRouter, createProcessMessage } from "./message-router";
 import { createWorkerRouter } from "./service";
 
@@ -93,6 +94,17 @@ const start = async (): Promise<void> => {
         log(`Knowledge graph hydration failed: ${hydrateResult.error.message}`);
       }
 
+      // 2b. Load embedding cache into memory (avoids per-query DB BLOB I/O)
+      const cacheResult = loadEmbeddingCache(db);
+      const embeddingCache = cacheResult.ok ? cacheResult.value : undefined;
+      if (cacheResult.ok) {
+        log(`Embedding cache loaded (${cacheResult.value.size} entries)`);
+      } else {
+        log(
+          `Embedding cache load failed (will fall back to DB): ${cacheResult.error.message}`,
+        );
+      }
+
       // 3. Ensure llama-server binary is available (auto-download if missing)
       const ensureResult = await ensureLlamaServer(BINARY_DIR);
       if (!ensureResult.ok) throw ensureResult.error;
@@ -150,6 +162,7 @@ const start = async (): Promise<void> => {
         db,
         modelManager,
         graphManager,
+        embeddingCache,
         enqueue: (msg) => messageRouter.enqueue(msg),
       });
       messageRouter = createMessageRouter({ processMessage });
@@ -176,6 +189,7 @@ const start = async (): Promise<void> => {
           router: messageRouter,
           modelManager,
           graphManager,
+          embeddingCache,
           startedAt,
           version: VERSION,
         },

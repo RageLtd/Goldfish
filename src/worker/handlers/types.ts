@@ -5,6 +5,7 @@
 import type { Database } from "bun:sqlite";
 import type { GraphManager } from "../../graph/index";
 import type { ModelManager } from "../../models/manager";
+import type { EmbeddingCache } from "../embedding-cache";
 import type { LastPruneStats, MessageRouter } from "../message-router";
 
 // ============================================================================
@@ -16,6 +17,7 @@ export interface WorkerDeps {
   readonly router?: MessageRouter;
   readonly modelManager?: ModelManager;
   readonly graphManager?: GraphManager;
+  readonly embeddingCache?: EmbeddingCache;
   readonly startedAt?: number;
   readonly version?: string;
 }

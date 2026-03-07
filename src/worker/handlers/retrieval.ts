@@ -11,14 +11,9 @@ import {
   getObservationById,
   getRecentSummaries,
   getSessionByClaudeId,
+  searchObservationIds,
 } from "../../db/index";
 import { expandSeeds, queryGraph, SAME_PROJECT_BONUS } from "../../graph/index";
-import {
-  buildSearchMemoryPrompt,
-  SEARCH_MEMORY_SEMANTIC_TOOL,
-} from "../../models/prompts";
-import { parseSmartSearchToolCall } from "../../models/tool-call-parser";
-import { fromPromise } from "../../types/result";
 import {
   formatContextFull,
   formatContextIndex,
@@ -35,15 +30,71 @@ import {
   type WorkerDeps,
 } from "./types";
 
+// ============================================================================
+// FTS query helpers
+// ============================================================================
+
+const STOP_WORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "are",
+  "but",
+  "not",
+  "you",
+  "all",
+  "can",
+  "had",
+  "her",
+  "was",
+  "one",
+  "our",
+  "out",
+  "has",
+  "have",
+  "from",
+  "been",
+  "some",
+  "them",
+  "than",
+  "its",
+  "over",
+  "such",
+  "that",
+  "with",
+  "this",
+  "will",
+  "each",
+  "make",
+  "like",
+  "does",
+  "when",
+  "what",
+  "just",
+  "how",
+]);
+
+/** Build a safe FTS5 OR query from a user prompt. Returns null if no usable terms. */
+const buildFtsQuery = (prompt: string): string | null => {
+  const words = prompt
+    .replace(/[^\w\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 3)
+    .filter((w) => !STOP_WORDS.has(w.toLowerCase()));
+  if (words.length === 0) return null;
+  return words.map((w) => `"${w}"`).join(" OR ");
+};
+
 /**
  * Retrieve relevant memories for a user prompt.
- * Uses the local model to extract search query, then graph-based retrieval:
+ * Uses the prompt directly as embedding query for graph-based retrieval:
  * embedding seeds -> spreading activation through knowledge graph.
  */
 export const handleRetrieve = async (
   deps: WorkerDeps,
   input: RetrieveInput,
 ): Promise<HandlerResponse> => {
+  const t0 = isDev ? performance.now() : 0;
   const { prompt, project, limit, sessionId } = input;
 
   debug(
@@ -79,61 +130,36 @@ export const handleRetrieve = async (
     };
   }
 
-  // Use local model to decide whether retrieval is needed and extract query
-  const searchPrompt = buildSearchMemoryPrompt(prompt);
-  const generateResult = await fromPromise(
-    deps.modelManager.generateText(
-      [
-        {
-          role: "system",
-          content:
-            "You are a memory retrieval assistant. When the user asks a technical question, call the search_memory_semantic tool. Only skip the tool for greetings or confirmations.",
-        },
-        { role: "user", content: searchPrompt },
-      ],
-      [SEARCH_MEMORY_SEMANTIC_TOOL],
-    ),
-  );
-  if (!generateResult.ok) {
-    debug(
-      `[retrieve] EXIT: model generation failed: ${generateResult.error.message}`,
-    );
-    return {
-      status: 500,
-      body: {
-        error: `Model generation failed: ${generateResult.error.message}`,
-      },
-    };
-  }
-  const modelOutput = generateResult.value;
-  debug(`[retrieve] modelOutput="${modelOutput.slice(0, 200)}"`);
+  // Hybrid search: FTS5 keywords + embedding similarity
+  debug(`[retrieve] hybrid search query="${prompt.slice(0, 80)}"`);
+  const tQuery = isDev ? performance.now() : 0;
 
-  // Parse the smart tool call (fts, semantic, or legacy)
-  const toolCall = parseSmartSearchToolCall(modelOutput);
-  if (toolCall) {
-    console.log(`[retrieve] mode=${toolCall.mode} query="${toolCall.query}"`);
+  // FTS5 keyword search (sub-millisecond, catches exact term matches)
+  let ftsHits: ReadonlyMap<number, number> | undefined;
+  const ftsQuery = buildFtsQuery(prompt);
+  if (ftsQuery) {
+    const ftsResult = searchObservationIds(deps.db, {
+      query: ftsQuery,
+      limit: limit * 2,
+    });
+    if (ftsResult.ok && ftsResult.value.size > 0) {
+      ftsHits = ftsResult.value;
+      debug(
+        `[retrieve] FTS hits=${ftsHits.size} query="${ftsQuery.slice(0, 80)}"`,
+      );
+    }
   }
-  if (!toolCall) {
-    // Model decided prompt is not searchable (greeting, small talk, etc.)
-    debug("[retrieve] EXIT: no tool call parsed from model output");
-    return {
-      status: 200,
-      body: {
-        context: null,
-        observationCount: 0,
-        typeCounts: {},
-      },
-    };
-  }
+  const tFts = isDev ? performance.now() : 0;
 
-  // Graph-based retrieval: embedding seeds -> spreading activation
   const searchResult = await queryGraph({
     db: deps.db,
     modelManager: deps.modelManager,
     graphManager: deps.graphManager,
-    query: toolCall.query,
+    query: prompt,
     project,
     limit,
+    embeddingCache: deps.embeddingCache,
+    ftsHits,
   });
 
   if (!searchResult.ok) {
@@ -165,13 +191,20 @@ export const handleRetrieve = async (
   // Format as index (same progressive disclosure format as SessionStart)
   const context = formatContextIndex(project, observations, []);
 
+  if (isDev) {
+    const elapsed = performance.now() - t0;
+    debug(
+      `[retrieve] PERF total=${elapsed.toFixed(1)}ms fts=${(tFts - tQuery).toFixed(1)}ms graph=${(performance.now() - tFts).toFixed(1)}ms observations=${observations.length} ftsHits=${ftsHits?.size ?? 0}`,
+    );
+  }
+
   return {
     status: 200,
     body: {
       context,
       observationCount: observations.length,
       typeCounts,
-      searchMode: toolCall.mode,
+      searchMode: ftsHits ? "hybrid" : "semantic",
     },
   };
 };
@@ -185,6 +218,7 @@ export const handleGetContext = async (
   deps: WorkerDeps,
   input: GetContextInput,
 ): Promise<HandlerResponse> => {
+  const t0 = isDev ? performance.now() : 0;
   const { project, limit, format = "index", since } = input;
 
   const sinceEpoch = parseSince(since);
@@ -290,6 +324,12 @@ export const handleGetContext = async (
     format === "index"
       ? formatContextIndex(project, observations, summaries)
       : formatContextFull(project, observations, summaries);
+
+  if (isDev) {
+    debug(
+      `[getContext] PERF total=${(performance.now() - t0).toFixed(1)}ms observations=${observations.length} summaries=${summaries.length}`,
+    );
+  }
 
   return {
     status: 200,

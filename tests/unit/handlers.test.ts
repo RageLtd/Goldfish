@@ -81,13 +81,7 @@ describe("handleRetrieve", () => {
     expect(result.status).toBe(503);
   });
 
-  it("returns no context when model returns no tool call", async () => {
-    (
-      mockModelManager.generateText as ReturnType<typeof mock>
-    ).mockImplementation(() =>
-      Promise.resolve("This is just a greeting, no search needed."),
-    );
-
+  it("returns no context when no observations exist", async () => {
     const input: RetrieveInput = {
       prompt: "Hello there!",
       project: "test",
@@ -101,10 +95,10 @@ describe("handleRetrieve", () => {
     );
   });
 
-  it("returns 500 when model generation fails", async () => {
+  it("returns 500 when embedding computation fails", async () => {
     (
-      mockModelManager.generateText as ReturnType<typeof mock>
-    ).mockImplementation(() => Promise.reject(new Error("Model crashed")));
+      mockModelManager.computeEmbedding as ReturnType<typeof mock>
+    ).mockImplementation(() => Promise.reject(new Error("Embedding failed")));
 
     const input: RetrieveInput = {
       prompt: "Fix the auth bug",
@@ -113,9 +107,6 @@ describe("handleRetrieve", () => {
     };
     const result = await handleRetrieve(deps, input);
     expect(result.status).toBe(500);
-    expect((result.body as { error: string }).error).toContain(
-      "Model generation failed",
-    );
   });
 
   it("returns formatted context when observations match", async () => {
@@ -151,15 +142,6 @@ describe("handleRetrieve", () => {
         new Float32Array([0.1, 0.2, 0.3]),
       );
     }
-
-    // Model extracts "auth token refresh" as search query
-    (
-      mockModelManager.generateText as ReturnType<typeof mock>
-    ).mockImplementation(() =>
-      Promise.resolve(
-        '<tool_call>\n{"name": "search_memory_semantic", "arguments": {"query": "auth token refresh"}}\n</tool_call>',
-      ),
-    );
 
     const input: RetrieveInput = {
       prompt: "I need to fix the authentication token refresh issue",

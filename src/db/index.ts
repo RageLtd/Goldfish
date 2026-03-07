@@ -37,6 +37,7 @@ export {
   jaccardSimilarity,
   type ObservationWithRank,
   type PruneCandidate,
+  searchObservationIds,
   searchObservations,
   storeObservation,
   updateObservationEmbedding,

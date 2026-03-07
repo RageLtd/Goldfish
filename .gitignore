@@ -39,3 +39,4 @@ docs/plans
 
 # GGUF model files (large, downloaded at runtime)
 /models/
+.claude/settings.local.json

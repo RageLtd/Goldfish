@@ -157,9 +157,11 @@ export const runPrune = (db: Database, options: PruneOptions): PruneResult => {
   const phase2Removed = new Set([...agedIds, ...dupIds]);
   const scoreCandidates = candidates.filter((c) => !phase2Removed.has(c.id));
 
+  const cwdFileSet: ReadonlySet<string> = new Set<string>();
   const scoringContext: ScoringContext = {
     currentProject: "",
     cwdFiles: [],
+    cwdFileSet,
     ftsRanks: new Map(),
     config: DEFAULT_SCORING_CONFIG,
   };

@@ -9,8 +9,6 @@
  * 4. Returns top-N activated nodes sorted by final activation
  */
 
-import type Graph from "graphology";
-
 // ============================================================================
 // Types
 // ============================================================================
@@ -40,22 +38,31 @@ export const DEFAULT_ACTIVATION_CONFIG: ActivationConfig = {
   maxResults: 20,
 };
 
+/** Pre-computed neighbor entry for fast adjacency lookups. */
+export interface AdjacencyEntry {
+  readonly neighbor: string;
+  readonly weight: number;
+}
+
+/** Pre-computed adjacency map: node key → neighbor entries (max weight per neighbor). */
+export type AdjacencyMap = ReadonlyMap<string, readonly AdjacencyEntry[]>;
+
 // ============================================================================
 // Spreading Activation
 // ============================================================================
 
 /**
- * Runs spreading activation on the graph from seed nodes.
+ * Runs frontier-based spreading activation using a pre-computed adjacency map.
  *
  * Each seed starts with its similarity score as initial activation.
- * On each hop, activation propagates to neighbors weighted by edge weight
- * and decayed by hopDecay. Multiple paths to the same node accumulate.
+ * On each hop, only nodes in the frontier (activated in the previous hop)
+ * propagate to neighbors, weighted by edge weight and decayed by hopDecay.
+ * Multiple paths to the same node accumulate.
  *
  * Returns activated nodes (excluding seeds) sorted by activation score.
- * When the graph has no edges, returns an empty array.
  */
 export const spreadingActivation = (
-  graph: Graph,
+  adjacency: AdjacencyMap,
   seeds: readonly ScoredSeed[],
   config?: Partial<ActivationConfig>,
 ): readonly ActivatedNode[] => {
@@ -71,47 +78,47 @@ export const spreadingActivation = (
   // Initialize seeds
   for (const seed of seeds) {
     const key = String(seed.observationId);
-    if (!graph.hasNode(key)) continue;
+    if (!adjacency.has(key)) continue;
     activations.set(key, seed.activation);
     hopDistances.set(key, 0);
     seedKeys.add(key);
   }
 
-  // Spread activation hop by hop
+  // Frontier-based spreading: only propagate from nodes activated last hop
+  let frontier = new Set<string>(seedKeys);
+
   for (let hop = 1; hop <= cfg.maxHops; hop++) {
     const decay = cfg.hopDecay ** hop;
-    // Snapshot current activations to avoid order-dependent propagation
-    const currentActivations = new Map(activations);
+    const deltas = new Map<string, number>();
+    const nextFrontier = new Set<string>();
 
-    for (const [nodeKey, nodeActivation] of currentActivations) {
-      const propagatedActivation = nodeActivation * decay;
-      if (propagatedActivation < cfg.minActivation) continue;
+    for (const nodeKey of frontier) {
+      const nodeActivation = activations.get(nodeKey) ?? 0;
+      const propagated = nodeActivation * decay;
+      if (propagated < cfg.minActivation) continue;
 
-      // Spread to all neighbors
-      graph.forEachNeighbor(nodeKey, (neighborKey) => {
-        // Get edge weight (check all edges between these nodes, take max)
-        let maxWeight = 0;
-        graph.forEachEdge(nodeKey, (_edge, attrs, source, target) => {
-          const otherKey = source === nodeKey ? target : source;
-          if (otherKey === neighborKey) {
-            const w = (attrs.weight as number) ?? 1.0;
-            if (w > maxWeight) maxWeight = w;
-          }
-        });
+      const neighbors = adjacency.get(nodeKey);
+      if (!neighbors) continue;
 
-        const contribution = propagatedActivation * maxWeight;
-        if (contribution < cfg.minActivation) return;
-
-        const existing = activations.get(neighborKey) ?? 0;
-        activations.set(neighborKey, existing + contribution);
-
-        // Track minimum hop distance
-        const existingHop = hopDistances.get(neighborKey);
-        if (existingHop === undefined || hop < existingHop) {
-          hopDistances.set(neighborKey, hop);
-        }
-      });
+      for (const { neighbor, weight } of neighbors) {
+        const contribution = propagated * weight;
+        if (contribution < cfg.minActivation) continue;
+        deltas.set(neighbor, (deltas.get(neighbor) ?? 0) + contribution);
+        nextFrontier.add(neighbor);
+      }
     }
+
+    // Apply all deltas after the full hop
+    for (const [key, delta] of deltas) {
+      activations.set(key, (activations.get(key) ?? 0) + delta);
+
+      const existingHop = hopDistances.get(key);
+      if (existingHop === undefined || hop < existingHop) {
+        hopDistances.set(key, hop);
+      }
+    }
+
+    frontier = nextFrontier;
   }
 
   // Collect results (exclude seed nodes)

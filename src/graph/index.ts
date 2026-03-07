@@ -16,6 +16,8 @@ export { createGraphManager } from "./manager";
 export type { GraphQueryResult } from "./query";
 export {
   expandSeeds,
+  FTS_BONUS,
+  MAX_GRAPH_SEEDS,
   queryGraph,
   SAME_PROJECT_BONUS,
   SEED_SIMILARITY_THRESHOLD,
@@ -23,6 +25,8 @@ export {
 export type {
   ActivatedNode,
   ActivationConfig,
+  AdjacencyEntry,
+  AdjacencyMap,
   ScoredSeed,
 } from "./retrieval";
 export {

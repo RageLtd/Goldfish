@@ -89,7 +89,7 @@ describe("graph retrieval", () => {
   describe("spreadingActivation", () => {
     it("returns empty for empty seeds", () => {
       const gm = createGraphManager();
-      expect(spreadingActivation(gm.graph, [])).toEqual([]);
+      expect(spreadingActivation(gm.adjacency, [])).toEqual([]);
     });
 
     it("returns empty when seeds have no graph connections", () => {
@@ -98,7 +98,7 @@ describe("graph retrieval", () => {
       gm.graph.addNode("1", { id: 1 });
 
       const seeds: ScoredSeed[] = [{ observationId: 1, activation: 0.8 }];
-      const result = spreadingActivation(gm.graph, seeds);
+      const result = spreadingActivation(gm.adjacency, seeds);
 
       expect(result).toEqual([]);
     });
@@ -118,7 +118,7 @@ describe("graph retrieval", () => {
       });
 
       const seeds: ScoredSeed[] = [{ observationId: 1, activation: 0.8 }];
-      const result = spreadingActivation(gm.graph, seeds);
+      const result = spreadingActivation(gm.adjacency, seeds);
 
       expect(result).toHaveLength(1);
       expect(result[0].observationId).toBe(2);
@@ -153,7 +153,7 @@ describe("graph retrieval", () => {
       });
 
       const seeds: ScoredSeed[] = [{ observationId: 1, activation: 1.0 }];
-      const result = spreadingActivation(gm.graph, seeds, { maxHops: 3 });
+      const result = spreadingActivation(gm.adjacency, seeds, { maxHops: 3 });
 
       expect(result.length).toBeGreaterThanOrEqual(2);
       const node2 = result.find((n) => n.observationId === 2);
@@ -197,7 +197,7 @@ describe("graph retrieval", () => {
         { observationId: 1, activation: 0.5 },
         { observationId: 2, activation: 0.5 },
       ];
-      const result = spreadingActivation(gm.graph, seeds);
+      const result = spreadingActivation(gm.adjacency, seeds);
 
       const node3 = result.find((n) => n.observationId === 3);
       expect(node3).toBeDefined();
@@ -220,7 +220,7 @@ describe("graph retrieval", () => {
       });
 
       const seeds: ScoredSeed[] = [{ observationId: 1, activation: 0.8 }];
-      const result = spreadingActivation(gm.graph, seeds);
+      const result = spreadingActivation(gm.adjacency, seeds);
 
       expect(result.every((n) => n.observationId !== 1)).toBe(true);
     });
@@ -243,7 +243,9 @@ describe("graph retrieval", () => {
       }
 
       const seeds: ScoredSeed[] = [{ observationId: 1, activation: 1.0 }];
-      const result = spreadingActivation(gm.graph, seeds, { maxResults: 2 });
+      const result = spreadingActivation(gm.adjacency, seeds, {
+        maxResults: 2,
+      });
 
       expect(result).toHaveLength(2);
     });
@@ -266,7 +268,7 @@ describe("graph retrieval", () => {
       }
 
       const seeds: ScoredSeed[] = [{ observationId: 1, activation: 0.5 }];
-      const result = spreadingActivation(gm.graph, seeds, {
+      const result = spreadingActivation(gm.adjacency, seeds, {
         minActivation: 0.05,
         maxHops: 4,
       });
@@ -284,7 +286,7 @@ describe("graph retrieval", () => {
     it("handles seed not in graph gracefully", () => {
       const gm = createGraphManager();
       const seeds: ScoredSeed[] = [{ observationId: 999, activation: 0.8 }];
-      const result = spreadingActivation(gm.graph, seeds);
+      const result = spreadingActivation(gm.adjacency, seeds);
 
       expect(result).toEqual([]);
     });
