@@ -1,31 +1,31 @@
 {
-  "name": "goldfish",
-  "version": "4.1.0",
-  "module": "src/index.ts",
-  "type": "module",
-  "private": true,
-  "scripts": {
-    "build": "bun scripts/build.ts",
-    "dev:install": "./scripts/dev-install.sh",
-    "test": "bun test tests/",
-    "test:unit": "bun test tests/unit/",
-    "worker:start": "bun src/worker/main.ts",
-    "worker:start:bin": "./bin/worker",
-    "release": "bun scripts/release.ts",
-    "release:dry": "bun scripts/release.ts --dry-run"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.4.0",
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5.9.3"
-  },
-  "dependencies": {
-    "graphology": "^0.26.0",
-    "graphology-communities-louvain": "^2.0.2",
-    "graphology-components": "^1.5.4",
-    "graphology-metrics": "^2.4.0",
-    "graphology-traversal": "^0.3.1"
-  }
+	"name": "goldfish",
+	"version": "4.1.1",
+	"module": "src/index.ts",
+	"type": "module",
+	"private": true,
+	"scripts": {
+		"build": "bun scripts/build.ts",
+		"dev:install": "./scripts/dev-install.sh",
+		"test": "bun test tests/",
+		"test:unit": "bun test tests/unit/",
+		"worker:start": "bun src/worker/main.ts",
+		"worker:start:bin": "./bin/worker",
+		"release": "bun scripts/release.ts",
+		"release:dry": "bun scripts/release.ts --dry-run"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.0",
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5.9.3"
+	},
+	"dependencies": {
+		"graphology": "^0.26.0",
+		"graphology-communities-louvain": "^2.0.2",
+		"graphology-components": "^1.5.4",
+		"graphology-metrics": "^2.4.0",
+		"graphology-traversal": "^0.3.1"
+	}
 }
