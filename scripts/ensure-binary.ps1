@@ -110,6 +110,15 @@ function Install-Goldfish {
 
     Write-Host "[goldfish] Downloading goldfish binary ($Platform)..." -ForegroundColor Cyan
 
+    # Gracefully stop the running worker so we can replace the binary.
+    # The next hook call will auto-start a new worker with the updated binary.
+    $workerPort = if ($env:GOLDFISH_PORT) { $env:GOLDFISH_PORT } else { "3456" }
+    try {
+        Invoke-WebRequest -Uri "http://127.0.0.1:${workerPort}/shutdown" -Method Post `
+            -TimeoutSec 5 -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
+    } catch {}
+    Start-Sleep -Seconds 1
+
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
     $url = "https://github.com/$Repo/releases/latest/download/goldfish-${Platform}.exe"
     Invoke-Download -Url $url -Dest $binary

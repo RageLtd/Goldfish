@@ -140,8 +140,16 @@ phase1_goldfish() {
 
     echo "[goldfish] Downloading goldfish binary (${PLATFORM})..." >&2
 
+    # Gracefully stop the running worker so we can replace the binary.
+    # The next hook call will auto-start a new worker with the updated binary.
+    local worker_port="${GOLDFISH_PORT:-3456}"
+    curl -s -X POST "http://127.0.0.1:${worker_port}/shutdown" --max-time 5 >/dev/null 2>&1 || true
+    # Brief pause for the process to release the file
+    sleep 1
+
     mkdir -p "$BIN_DIR"
     local url="https://github.com/${REPO}/releases/latest/download/goldfish-${PLATFORM}${ext}"
+
     download "$url" "$binary"
 
     if [ "$OS" != "windows" ]; then
