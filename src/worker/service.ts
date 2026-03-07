@@ -20,11 +20,18 @@ import {
   handleGraphBackfill,
   handleGraphStats,
   handleHealth,
+  handleMapGet,
+  handleMapReindex,
+  handleMapScan,
+  handleMapSearch,
+  handleMapStats,
   handleQueueObservation,
   handleQueueSummary,
   handleRetrieve,
   handleSearch,
   handleShutdown,
+  type MapReindexInput,
+  type MapScanInput,
   type QueueObservationInput,
   type QueueSummaryInput,
   type RetrieveInput,
@@ -338,6 +345,91 @@ const handleGraphBackfillRoute = async (
   return jsonResponse(result.status, result.body);
 };
 
+const handleMapScanRoute = async (
+  deps: WorkerDeps,
+  request: Request,
+): Promise<Response> => {
+  const body = await parseJsonBody<MapScanInput>(request);
+  if (!body) {
+    return jsonResponse(400, { error: "Invalid JSON body" });
+  }
+  const result = await handleMapScan(deps, {
+    project: body.project || "",
+    projectRoot: body.projectRoot || "",
+  });
+  return jsonResponse(result.status, result.body);
+};
+
+const handleMapGetRoute = async (
+  deps: WorkerDeps,
+  request: Request,
+): Promise<Response> => {
+  const params = getSearchParams(request);
+  const project = params.get("project");
+  if (!project) {
+    return jsonResponse(400, { error: "project parameter is required" });
+  }
+  const directory = params.get("directory") || undefined;
+  const projectRoot = params.get("projectRoot") || undefined;
+  const result = handleMapGet(deps, {
+    project: sanitizeProject(project),
+    directory,
+    projectRoot,
+  });
+  return jsonResponse(result.status, result.body);
+};
+
+const handleMapSearchRoute = async (
+  deps: WorkerDeps,
+  request: Request,
+): Promise<Response> => {
+  const params = getSearchParams(request);
+  const project = params.get("project");
+  const query = params.get("query");
+  if (!project || !query) {
+    return jsonResponse(400, {
+      error: "project and query parameters are required",
+    });
+  }
+  const result = handleMapSearch(deps, {
+    project: sanitizeProject(project),
+    query,
+  });
+  return jsonResponse(result.status, result.body);
+};
+
+const handleMapStatsRoute = async (
+  deps: WorkerDeps,
+  request: Request,
+): Promise<Response> => {
+  const params = getSearchParams(request);
+  const project = params.get("project");
+  if (!project) {
+    return jsonResponse(400, { error: "project parameter is required" });
+  }
+  const result = handleMapStats(deps, {
+    project: sanitizeProject(project),
+  });
+  return jsonResponse(result.status, result.body);
+};
+
+const handleMapReindexRoute = async (
+  deps: WorkerDeps,
+  request: Request,
+): Promise<Response> => {
+  const body = await parseJsonBody<MapReindexInput>(request);
+  if (!body) {
+    return jsonResponse(400, { error: "Invalid JSON body" });
+  }
+  const result = handleMapReindex(deps, {
+    project: body.project || "",
+    projectRoot: body.projectRoot || "",
+    filePath: body.filePath || "",
+    fileHash: body.fileHash || "",
+  });
+  return jsonResponse(result.status, result.body);
+};
+
 // ============================================================================
 // Router
 // ============================================================================
@@ -375,6 +467,11 @@ const routes: readonly Route[] = [
     path: "/graph/backfill",
     handler: handleGraphBackfillRoute,
   },
+  { method: "POST", path: "/map/scan", handler: handleMapScanRoute },
+  { method: "GET", path: "/map", handler: handleMapGetRoute },
+  { method: "GET", path: "/map/search", handler: handleMapSearchRoute },
+  { method: "GET", path: "/map/stats", handler: handleMapStatsRoute },
+  { method: "POST", path: "/map/reindex", handler: handleMapReindexRoute },
 ];
 
 export interface WorkerRouterOptions {

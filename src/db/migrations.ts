@@ -311,8 +311,6 @@ export const migrations: readonly Migration[] = [
       "Deduplicate bidirectional edges and normalize source_id < target_id",
     up: (db) => {
       // Delete duplicate bidirectional edges where the reverse also exists.
-      // For each pair (A,B) with direction='bidirectional', keep only the row
-      // where source_id < target_id (or the lower id if both point the same way).
       db.run(`
         DELETE FROM kg_edges
         WHERE direction = 'bidirectional'
@@ -327,7 +325,6 @@ export const migrations: readonly Migration[] = [
       `);
 
       // Normalize remaining bidirectional edges where source_id > target_id
-      // by swapping the IDs. Use a temp table to avoid unique constraint conflicts.
       db.run(`
         CREATE TEMP TABLE edges_to_flip AS
         SELECT id, target_id AS new_source, source_id AS new_target
@@ -343,6 +340,63 @@ export const migrations: readonly Migration[] = [
       `);
 
       db.run("DROP TABLE IF EXISTS edges_to_flip");
+    },
+  },
+  {
+    version: 11,
+    description: "Create codebase map tables",
+    up: (db) => {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS codebase_map (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project TEXT NOT NULL,
+          path TEXT NOT NULL,
+          type TEXT NOT NULL CHECK(type IN ('directory', 'file')),
+          summary TEXT,
+          file_hash TEXT,
+          last_scanned_epoch INTEGER NOT NULL,
+          UNIQUE(project, path)
+        )
+      `);
+
+      db.run(
+        "CREATE INDEX IF NOT EXISTS idx_codebase_map_project ON codebase_map(project)",
+      );
+      db.run(
+        "CREATE INDEX IF NOT EXISTS idx_codebase_map_type ON codebase_map(project, type)",
+      );
+
+      db.run(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS codebase_map_fts USING fts5(
+          path,
+          summary,
+          content='codebase_map',
+          content_rowid='id'
+        )
+      `);
+
+      db.run(`
+        CREATE TRIGGER IF NOT EXISTS codebase_map_ai AFTER INSERT ON codebase_map BEGIN
+          INSERT INTO codebase_map_fts(rowid, path, summary)
+          VALUES (new.id, new.path, new.summary);
+        END
+      `);
+
+      db.run(`
+        CREATE TRIGGER IF NOT EXISTS codebase_map_ad AFTER DELETE ON codebase_map BEGIN
+          INSERT INTO codebase_map_fts(codebase_map_fts, rowid, path, summary)
+          VALUES ('delete', old.id, old.path, old.summary);
+        END
+      `);
+
+      db.run(`
+        CREATE TRIGGER IF NOT EXISTS codebase_map_au AFTER UPDATE ON codebase_map BEGIN
+          INSERT INTO codebase_map_fts(codebase_map_fts, rowid, path, summary)
+          VALUES ('delete', old.id, old.path, old.summary);
+          INSERT INTO codebase_map_fts(rowid, path, summary)
+          VALUES (new.id, new.path, new.summary);
+        END
+      `);
     },
   },
 ];

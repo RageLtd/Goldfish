@@ -5,6 +5,7 @@
 const isDev = process.env.NODE_ENV === "development";
 const debug = isDev ? (...args: unknown[]) => console.debug(...args) : () => {};
 
+import { searchMap } from "../../db/codebase-map";
 import type { ObservationWithRank } from "../../db/index";
 import {
   getCandidateObservations,
@@ -189,7 +190,22 @@ export const handleRetrieve = async (
   }
 
   // Format as index (same progressive disclosure format as SessionStart)
-  const context = formatContextIndex(project, observations, []);
+  let context = formatContextIndex(project, observations, []);
+
+  // Append matching codebase map entries if available
+  if (ftsQuery) {
+    const mapResult = searchMap(deps.db, project, ftsQuery);
+    if (mapResult.ok && mapResult.value.length > 0) {
+      const mapLines = mapResult.value
+        .slice(0, 10)
+        .map((e) => {
+          const path = e.type === "directory" ? `${e.path}/` : e.path;
+          return e.summary ? `- ${path} — ${e.summary}` : `- ${path}`;
+        })
+        .join("\n");
+      context += `\n\n## Relevant files\n${mapLines}`;
+    }
+  }
 
   if (isDev) {
     const elapsed = performance.now() - t0;

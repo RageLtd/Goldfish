@@ -1,5 +1,17 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"continue\":true,\"suppressOutput\":false,\"hookSpecificOutput\":{\"permissionDecision\":\"allow\"},\"systemMessage\":\"[goldfish] If searching for a file, check the codebase map first: goldfish map:show or goldfish map:search <query>\"}'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "*",

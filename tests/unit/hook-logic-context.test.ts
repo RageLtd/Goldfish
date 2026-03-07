@@ -51,7 +51,7 @@ describe("hook logic — context", () => {
       expect(result.systemMessage).toContain("2 decisions");
       expect(result.systemMessage).toContain("3 features");
       expect(result.systemMessage).toContain("2 session summaries");
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledTimes(2); // /context + /map
     });
 
     it("includes type counts in system message", async () => {

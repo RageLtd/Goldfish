@@ -9,6 +9,17 @@ export {
   handleShutdown,
 } from "./admin";
 export {
+  handleMapGet,
+  handleMapReindex,
+  handleMapScan,
+  handleMapSearch,
+  handleMapStats,
+  type MapQueryInput,
+  type MapReindexInput,
+  type MapScanInput,
+  type MapSearchInput,
+} from "./codebase-map";
+export {
   handleGetNeighbors,
   handleGraphBackfill,
   handleGraphStats,

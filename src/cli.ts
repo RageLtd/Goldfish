@@ -17,6 +17,11 @@
  *   graph:backfill  - Create edges for observations with embeddings but no edges
  *   graph:stats     - Show knowledge graph statistics
  *   graph:show      - Show observation neighborhood in the graph
+ *   map:scan        - Scan project and build codebase map
+ *   map:show        - Show directory-level codebase map
+ *   map:detail      - Show file-level detail for a directory
+ *   map:search      - Search codebase map by keyword
+ *   map:stats       - Show codebase map statistics
  *   prune           - Remove stale, duplicate, and low-score observations
  *   search          - Search observations or summaries
  *   timeline        - Show recent activity timeline
@@ -98,6 +103,26 @@ const COMMANDS: Record<string, () => Promise<void>> = {
     const { graphShowMain } = await import("./commands/query");
     await graphShowMain();
   },
+  "map:scan": async () => {
+    const { mapScanMain } = await import("./commands/map");
+    await mapScanMain();
+  },
+  "map:show": async () => {
+    const { mapShowMain } = await import("./commands/map");
+    await mapShowMain();
+  },
+  "map:detail": async () => {
+    const { mapDetailMain } = await import("./commands/map");
+    await mapDetailMain();
+  },
+  "map:search": async () => {
+    const { mapSearchMain } = await import("./commands/map");
+    await mapSearchMain();
+  },
+  "map:stats": async () => {
+    const { mapStatsMain } = await import("./commands/map");
+    await mapStatsMain();
+  },
   version: async () => {
     console.log(`goldfish v${pkg.version}`);
   },
@@ -119,6 +144,11 @@ Commands:
   graph:backfill  Create edges for observations with embeddings but no edges
   graph:stats     Show knowledge graph statistics
   graph:show      Show observation neighborhood in the graph
+  map:scan        Scan project and build codebase map
+  map:show        Show directory-level codebase map
+  map:detail      Show file-level detail for a directory
+  map:search      Search codebase map by keyword
+  map:stats       Show codebase map statistics
   prune           Remove stale, duplicate, and low-score observations
   search          Search observations or summaries
   timeline        Show recent activity timeline
@@ -137,6 +167,11 @@ Query commands (require running worker):
   goldfish health
   goldfish graph:stats
   goldfish graph:show <id>
+  goldfish map:scan [--project ...]
+  goldfish map:show [--project ...]
+  goldfish map:detail <directory> [--project ...]
+  goldfish map:search <query> [--project ...]
+  goldfish map:stats [--project ...]
 `);
 };
 

@@ -111,6 +111,27 @@ const findToolCallJson = (text: string): string | null => {
 };
 
 // ============================================================================
+// Generic Tool Call Parser
+// ============================================================================
+
+export interface GenericToolCallResult {
+  readonly name: string;
+  readonly arguments: Record<string, unknown>;
+}
+
+/**
+ * Parses any tool call from model output, returning raw arguments.
+ * Use when the tool schema is not known at compile time.
+ */
+export const parseGenericToolCall = (
+  text: string,
+): GenericToolCallResult | null => {
+  const extracted = extractToolCallJson(text);
+  if (!extracted) return null;
+  return { name: extracted.name, arguments: extracted.rawArgs };
+};
+
+// ============================================================================
 // Observation Tool Call Parser
 // ============================================================================
 

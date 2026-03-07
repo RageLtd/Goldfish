@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  parseGenericToolCall,
   parseSearchToolCall,
   parseSmartSearchToolCall,
   parseSummaryToolCall,
@@ -241,5 +242,28 @@ describe("parseSmartSearchToolCall", () => {
     expect(result).not.toBeNull();
     expect(result?.mode).toBe("semantic");
     expect(result?.query).toBe("error handling patterns");
+  });
+});
+
+describe("parseGenericToolCall", () => {
+  it("parses any tool call and returns raw arguments", () => {
+    const input = `{"name": "summarize_directory", "arguments": {"summary": "HTTP handlers for CRUD operations"}}`;
+    const result = parseGenericToolCall(input);
+    expect(result).not.toBeNull();
+    expect(result?.name).toBe("summarize_directory");
+    expect(result?.arguments.summary).toBe("HTTP handlers for CRUD operations");
+  });
+
+  it("returns null for no tool call", () => {
+    const result = parseGenericToolCall("No tool call here");
+    expect(result).toBeNull();
+  });
+
+  it("handles tool calls with unknown argument shapes", () => {
+    const input = `{"name": "custom_tool", "arguments": {"count": 42, "tags": ["a", "b"]}}`;
+    const result = parseGenericToolCall(input);
+    expect(result).not.toBeNull();
+    expect(result?.arguments.count).toBe(42);
+    expect(result?.arguments.tags).toEqual(["a", "b"]);
   });
 });

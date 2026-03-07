@@ -227,43 +227,91 @@ export const processContextHook = async (
     return createSuccessOutput();
   }
 
-  const fetchResult = await fromPromise(
-    getFromWorker(deps, "/context", {
-      project,
-      limit: "50", // Increased from 20 since index format is lightweight
-      format: "index", // Progressive disclosure: load semantic index, not full content
-    }),
-  );
+  // Fetch memories and codebase map in parallel
+  const [fetchResult, mapResult] = await Promise.all([
+    fromPromise(
+      getFromWorker(deps, "/context", {
+        project,
+        limit: "50",
+        format: "index",
+      }),
+    ),
+    fromPromise(
+      getFromWorker(deps, "/map", {
+        project,
+        ...(input.cwd ? { projectRoot: input.cwd } : {}),
+      }),
+    ),
+  ]);
 
-  if (!fetchResult.ok) {
-    return createSuccessOutput();
+  const memoryContext = fetchResult.ok
+    ? (fetchResult.value as {
+        context?: string;
+        observationCount?: number;
+        summaryCount?: number;
+        typeCounts?: Record<string, number>;
+      })
+    : null;
+
+  const mapContext = mapResult.ok
+    ? (mapResult.value as { formatted?: string; entries?: unknown[] })
+    : null;
+
+  // Build combined context
+  const parts: string[] = [];
+
+  if (memoryContext?.context?.trim()) {
+    parts.push(memoryContext.context);
   }
 
-  const result = fetchResult.value as {
-    context?: string;
-    observationCount?: number;
-    summaryCount?: number;
-    typeCounts?: Record<string, number>;
-    format?: string;
-  };
+  // Append codebase map if it has entries (not just the "no map" message)
+  if (
+    mapContext?.formatted &&
+    mapContext.entries &&
+    (mapContext.entries as unknown[]).length > 0
+  ) {
+    parts.push(
+      `\n# [goldfish] codebase map\n${mapContext.formatted}\n\nUse \`goldfish map:detail <dir>\` for file-level detail.`,
+    );
+  }
 
-  if (result.context?.trim()) {
+  if (parts.length > 0) {
     const systemMessage = formatSystemMessage(
       input.source,
-      result.observationCount ?? 0,
-      result.summaryCount ?? 0,
-      result.typeCounts ?? {},
+      memoryContext?.observationCount ?? 0,
+      memoryContext?.summaryCount ?? 0,
+      memoryContext?.typeCounts ?? {},
     );
 
-    return createContextOutput(result.context, systemMessage);
+    return createContextOutput(parts.join("\n"), systemMessage);
   }
 
   return createSuccessOutput();
 };
 
+/** Tools whose PostToolUse should trigger a codebase map reindex. */
+const MAP_REINDEX_TOOLS = new Set([
+  "Write",
+  "Edit",
+  "MultiEdit",
+  "NotebookEdit",
+]);
+
+/**
+ * Extracts file_path from tool input for map reindexing.
+ */
+const extractFilePath = (toolInput: unknown): string | null => {
+  if (typeof toolInput !== "object" || toolInput === null) return null;
+  const input = toolInput as Record<string, unknown>;
+  if (typeof input.file_path === "string") return input.file_path;
+  if (typeof input.path === "string") return input.path;
+  return null;
+};
+
 /**
  * Processes PostToolUse hook - queues observation.
  * Filters out trivial tools and observations with minimal content.
+ * Also triggers codebase map reindex for Write/Edit tools.
  */
 export const processSaveHook = async (
   deps: HookDeps,
@@ -280,8 +328,8 @@ export const processSaveHook = async (
     return createSuccessOutput();
   }
 
-  // Fire-and-forget: don't block Claude Code
-  await fromPromise(
+  // Fire-and-forget: queue observation
+  const observationPromise = fromPromise(
     postToWorker(deps, "/observation", {
       claudeSessionId: input.session_id,
       toolName: input.tool_name,
@@ -290,6 +338,33 @@ export const processSaveHook = async (
       cwd: input.cwd,
     }),
   );
+
+  // Fire-and-forget: reindex file in codebase map for write tools
+  let reindexPromise: Promise<unknown> | undefined;
+  if (MAP_REINDEX_TOOLS.has(input.tool_name)) {
+    const filePath = extractFilePath(input.tool_input);
+    if (filePath && input.cwd) {
+      const project = extractProject(input.cwd);
+      if (project) {
+        // Make path relative to cwd
+        const relativePath = filePath.startsWith(input.cwd)
+          ? filePath.slice(input.cwd.length + 1)
+          : filePath;
+        // Simple hash of timestamp — the real hash is computed by the scanner
+        const fileHash = Date.now().toString(16);
+        reindexPromise = fromPromise(
+          postToWorker(deps, "/map/reindex", {
+            project,
+            projectRoot: input.cwd,
+            filePath: relativePath,
+            fileHash,
+          }),
+        );
+      }
+    }
+  }
+
+  await Promise.all([observationPromise, reindexPromise].filter(Boolean));
 
   return createSuccessOutput();
 };

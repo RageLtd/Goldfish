@@ -56,13 +56,26 @@ export interface LinkData {
   readonly observationId: number;
 }
 
+export interface MapResummarizeData {
+  readonly project: string;
+  readonly projectRoot: string;
+  readonly directory: string;
+}
+
+export interface MapRefreshData {
+  readonly project: string;
+  readonly projectRoot: string;
+}
+
 export type RouterMessageType =
   | "observation"
   | "summarize"
   | "complete"
   | "embed"
   | "link"
-  | "prune";
+  | "prune"
+  | "map-resummarize"
+  | "map-refresh";
 
 export interface RouterMessage {
   readonly type: RouterMessageType;
@@ -73,7 +86,9 @@ export interface RouterMessage {
     | CompleteData
     | EmbedData
     | LinkData
-    | PruneData;
+    | PruneData
+    | MapResummarizeData
+    | MapRefreshData;
 }
 
 export interface MessageRouterDeps {
@@ -275,6 +290,90 @@ export const createProcessMessage = (
       log(
         `Auto-prune complete: ${result.deleted} deleted (${result.aged} aged, ${result.duplicates} dups, ${result.lowScore} low-score)`,
       );
+      return;
+    }
+
+    // Map re-summarize: re-generate a directory summary after file changes
+    if (msg.type === "map-resummarize") {
+      const data = msg.data as MapResummarizeData;
+      // Dynamic import to avoid circular dependency
+      const { scanProject } = await import("../codebase-map/scanner");
+      const { summarizeDirectories } = await import(
+        "../codebase-map/summarizer"
+      );
+
+      const scanResult = await scanProject(data.projectRoot);
+      if (!scanResult.ok) {
+        log(`Map re-scan failed: ${scanResult.error.message}`);
+        return;
+      }
+
+      // Only re-summarize the directory that changed
+      const targetDir = scanResult.value.directories.find(
+        (d) => d.relativePath === data.directory,
+      );
+      if (targetDir) {
+        await summarizeDirectories(
+          {
+            db,
+            modelManager: deps.modelManager,
+            projectRoot: data.projectRoot,
+            project: data.project,
+          },
+          [targetDir],
+        );
+        log(`Re-summarized directory: ${data.directory}`);
+      }
+      return;
+    }
+
+    // Map refresh: scan project for stale files, enqueue re-summarization per directory
+    if (msg.type === "map-refresh") {
+      const data = msg.data as MapRefreshData;
+      const { scanProject } = await import("../codebase-map/scanner");
+      const { getStaleEntries } = await import("../db/codebase-map");
+
+      const scanResult = await scanProject(data.projectRoot);
+      if (!scanResult.ok) {
+        log(`Map refresh scan failed: ${scanResult.error.message}`);
+        return;
+      }
+
+      // Build current hash map from scan
+      const currentHashes = new Map<string, string>();
+      for (const dir of scanResult.value.directories) {
+        for (const file of dir.files) {
+          currentHashes.set(file.relativePath, file.hash);
+        }
+      }
+
+      const staleResult = getStaleEntries(db, data.project, currentHashes);
+      if (!staleResult.ok || staleResult.value.length === 0) {
+        return;
+      }
+
+      // Collect unique directories that need re-summarization
+      const staleDirs = new Set<string>();
+      for (const entry of staleResult.value) {
+        const lastSlash = entry.path.lastIndexOf("/");
+        staleDirs.add(lastSlash >= 0 ? entry.path.slice(0, lastSlash) : ".");
+      }
+
+      log(
+        `Map refresh: ${staleResult.value.length} stale files in ${staleDirs.size} directories`,
+      );
+
+      for (const dir of staleDirs) {
+        deps.enqueue({
+          type: "map-resummarize",
+          claudeSessionId: "",
+          data: {
+            project: data.project,
+            projectRoot: data.projectRoot,
+            directory: dir,
+          },
+        });
+      }
       return;
     }
 
